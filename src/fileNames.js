@@ -1,17 +1,13 @@
 const path = require('path');
 
-function slugify(text) {
-  return String(text)
-    .replace(/ł/g, 'l').replace(/Ł/g, 'L')
-    .normalize('NFD').replace(/[̀-ͯ]/g, '')
-    .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-}
-
+// "proj-12" + "Add 2FA: login" -> "PROJ-12_Add_2FA_login.md"; characters no file system accepts are dropped.
 function issueFileName(key, summary) {
   let name = String(key).toUpperCase();
-  for (const word of slugify(summary).split('-').filter(Boolean)) {
-    if ((name + '-' + word).length > 60) break;
-    name += '-' + word;
+  const words = String(summary || '').replace(/[<>:"/\\|?*\u0000-\u001f]/g, ' ').split(/\s+/)
+    .map((w) => w.replace(/^[._]+|[._]+$/g, '')).filter(Boolean);
+  for (const word of words) {
+    if ((name + '_' + word).length > 100) break;
+    name += '_' + word;
   }
   return name + '.md';
 }
@@ -37,4 +33,4 @@ function subfolderSegments(text) {
   return String(text || '').split(/[\\/]+/).map((s) => s.trim()).filter((s) => s && s !== '.' && s !== '..');
 }
 
-module.exports = { slugify, issueFileName, parseDownloadFolder, subfolderSegments };
+module.exports = { issueFileName, parseDownloadFolder, subfolderSegments };

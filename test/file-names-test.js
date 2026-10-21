@@ -1,11 +1,13 @@
 const assert = (ok, name) => { if (!ok) { console.error('FAIL: ' + name); process.exit(1); } };
-const { slugify, issueFileName, parseDownloadFolder, subfolderSegments } = require('../src/fileNames');
+const { issueFileName, parseDownloadFolder, subfolderSegments } = require('../src/fileNames');
 
-assert(slugify('Zażółć gęślą jaźń — Łódź!') === 'zazolc-gesla-jazn-lodz', 'Polish letters are transliterated');
-assert(issueFileName('proj-12', 'Add two-factor login') === 'PROJ-12-add-two-factor-login.md', 'key and summary make the name');
+assert(issueFileName('proj-12', 'Add two-factor login') === 'PROJ-12_Add_two-factor_login.md', 'upper-case key, spaces become underscores');
+assert(issueFileName('P1726-07', 'Zmiana pakietu: wywołanie  Read/Current?') === 'P1726-07_Zmiana_pakietu_wywołanie_Read_Current.md',
+  'Polish letters stay, characters a file system rejects are dropped');
 assert(issueFileName('PROJ-1', '') === 'PROJ-1.md', 'an empty summary leaves the key');
+assert(issueFileName('PROJ-1', '... .hidden.') === 'PROJ-1_hidden.md', 'no leading or trailing dots');
 const long = issueFileName('PROJ-1', 'word '.repeat(40));
-assert(long.length <= 63 && long.startsWith('PROJ-1-word-'), 'long summaries are cut at a word, got: ' + long);
+assert(long.length <= 103 && long.startsWith('PROJ-1_word_'), 'long summaries are cut at a word, got: ' + long);
 
 assert(parseDownloadFolder('', '/home/u').kind === 'active', 'empty means the active file\'s folder');
 assert(parseDownloadFolder('  ', '/home/u').kind === 'active', 'blank means the active file\'s folder');

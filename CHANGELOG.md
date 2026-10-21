@@ -3,6 +3,15 @@
 This file lists user-visible changes to Jira to Markdown. The project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.1.0] - 2026-10-21
+
+### Changed
+
+- Downloaded issues are named `<KEY>_<Summary_with_underscores>.md`, for
+  example `PROJ-2_Add_two-factor_login.md`: the key in upper case, then the
+  summary as written, with spaces as underscores. Files saved under the old
+  names are still found and refreshed by their issue key.
+
 ## [1.0.0] - 2026-10-21
 
 First release under the name Jira to Markdown (`jira-to-md`). It continues
