@@ -32,13 +32,13 @@ and context path from each link, so you can work with multiple instances.
 4. For an epic, choose which issues to download. The epic and all its stories
    and tasks are preselected.
 
-Each issue is saved as `<KEY>-<summary>.md` in the download folder:
+Each issue is saved as `<KEY>_<Summary_with_underscores>.md` in the download folder:
 
 ```text
 docs/jira/
-  PROJ-1-login-rework.md
-  PROJ-2-add-two-factor-login.md
-  PROJ-3-store-totp-secrets.md
+  PROJ-1_Login_rework.md
+  PROJ-2_Add_two-factor_login.md
+  PROJ-3_Store_TOTP_secrets.md
 ```
 
 - The download folder is `jiraToMd.downloadFolder`. When it is empty, issues are

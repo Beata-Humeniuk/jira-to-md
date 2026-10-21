@@ -163,7 +163,7 @@ const STORY = issue('PROJ-2', {
   parent: { key: 'PROJ-1', fields: { issuetype: EPIC_TYPE } }
 });
 const TASK = issue('PROJ-3', { summary: 'Store TOTP secrets', issuetype: { name: 'Task' } });
-const STORY_FILE = '/w/jira/PROJ-2-add-two-factor-login.md';
+const STORY_FILE = '/w/jira/PROJ-2_Add_two-factor_login.md';
 
 function epicRoutes() {
   return [
@@ -188,7 +188,7 @@ async function main() {
   assert(story.includes('epic: PROJ-1') && story.includes('generator: jira-to-md@'), 'the epic and the generator are recorded');
   assert(story.includes('# Add two-factor login\n\n## Why\n\nUsers need **stronger** logins.\n\n## What Changes\n\n- Add a TOTP step\n'),
     'the description is converted to Markdown, got:\n' + story);
-  assert(disk.get('/w/jira/PROJ-3-store-totp-secrets.md').includes('# Store TOTP secrets'), 'the task is saved next to it');
+  assert(disk.get('/w/jira/PROJ-3_Store_TOTP_secrets.md').includes('# Store TOTP secrets'), 'the task is saved next to it');
   assert(!Array.from(disk.keys()).some((p) => p.includes('PROJ-1')), 'the unpicked epic is not saved');
   assert(info.some((m) => m.includes('Saved 2 issues to jira/')), 'a summary, got: ' + info.join(' | '));
 
@@ -215,7 +215,7 @@ async function main() {
   routes = [{ match: '/rest/api/2/issue/PROJ-2?', body: STORY }];
   answers.input = SITE + '/browse/PROJ-2';
   await fetchIssueCommand();
-  assert(!errors.length && disk.has('/w/docs/PROJ-2-add-two-factor-login.md'),
+  assert(!errors.length && disk.has('/w/docs/PROJ-2_Add_two-factor_login.md'),
     'an empty download folder means the active file\'s folder, got: ' + Array.from(disk.keys()).join(', '));
 
   reset();
@@ -227,7 +227,7 @@ async function main() {
   await fetchIssueCommand();
   vscodeStub.window.showInputBox = async () => answers.input;
   assert(prompts[0].includes('subfolder of jira'), 'the subfolder is asked for, got: ' + prompts.join(' | '));
-  assert(!errors.length && disk.has('/w/jira/services/account/PROJ-2-add-two-factor-login.md'),
+  assert(!errors.length && disk.has('/w/jira/services/account/PROJ-2_Add_two-factor_login.md'),
     'the issue goes to the subfolder, got: ' + Array.from(disk.keys()).join(', '));
 
   reset();
@@ -329,7 +329,7 @@ async function main() {
   answers.pick = (items) => items.filter((i) => i.issue.key !== 'ABC-1');
   await fetchIssueCommand();
   assert(!errors.length, 'server epic downloads, got: ' + errors.join(' | '));
-  const serverFile = disk.get('/w/jira/ABC-2-add-export.md');
+  const serverFile = disk.get('/w/jira/ABC-2_Add_export.md');
   assert(serverFile && serverFile.includes('url: ' + SERVER + '/browse/ABC-2') && serverFile.includes('epic: ABC-1'),
     'the epic link names the epic, got: ' + Array.from(disk.keys()).join(', '));
   assert(sent.every((r) => r.url.indexOf('/search/jql') < 0), 'server uses the classic search');
@@ -377,7 +377,7 @@ async function main() {
   reset();
   settings = {};
   const RICH = issue('PROJ-8', { summary: 'Package change', description: '<h2 dir="auto">Zmiany</h2>\n<p>Stare.</p>' });
-  const RICH_FILE = '/w/jira/PROJ-8-package-change.md';
+  const RICH_FILE = '/w/jira/PROJ-8_Package_change.md';
   disk.set(RICH_FILE, '---\njira:\n  url: ' + SITE + '/browse/PROJ-8\n  updated: 2026-09-01T10:00:00.000+0000\n---\n\n' +
     '# Package change\n\n## Zmiany w procesie:\n\n1. Zmiany w **response**\n');
   routes = [
