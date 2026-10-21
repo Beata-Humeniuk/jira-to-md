@@ -1,0 +1,118 @@
+{
+  "name": "jira-to-md",
+  "displayName": "Jira to Markdown",
+  "description": "Download Jira issues and whole epics as Markdown files, edit them in VS Code, and push them back to Jira.",
+  "version": "1.0.0",
+  "publisher": "beatahumeniuk",
+  "license": "MIT",
+  "author": {
+    "name": "Beata Humeniuk"
+  },
+  "icon": "media/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Beata-Humeniuk/jira-to-md.git"
+  },
+  "homepage": "https://github.com/Beata-Humeniuk/jira-to-md#readme",
+  "bugs": {
+    "url": "https://github.com/Beata-Humeniuk/jira-to-md/issues"
+  },
+  "engines": {
+    "vscode": "^1.82.0"
+  },
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true
+    }
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "jira",
+    "markdown",
+    "atlassian",
+    "epic",
+    "issue"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onLanguage:markdown"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "jiraToMd.fetchIssue",
+        "title": "Download Issue or Epic",
+        "category": "Jira"
+      },
+      {
+        "command": "jiraToMd.publishIssue",
+        "title": "Push Issue",
+        "category": "Jira"
+      },
+      {
+        "command": "jiraToMd.pullIssue",
+        "title": "Pull Issue",
+        "category": "Jira"
+      }
+    ],
+    "markdown.markdownItPlugins": true,
+    "markdown.previewStyles": [
+      "./media/preview.css"
+    ],
+    "configuration": {
+      "title": "Jira to Markdown",
+      "properties": {
+        "jiraToMd.token": {
+          "type": "string",
+          "default": "",
+          "description": "API token (Cloud) or Personal Access Token (Server/DC)."
+        },
+        "jiraToMd.email": {
+          "type": "string",
+          "default": "",
+          "description": "Atlassian account e-mail. Cloud only."
+        },
+        "jiraToMd.downloadFolder": {
+          "type": "string",
+          "default": "",
+          "description": "Where to save issues. Empty = the active file's folder. Relative paths are resolved from the workspace root."
+        },
+        "jiraToMd.askSubfolder": {
+          "type": "boolean",
+          "default": false,
+          "description": "Ask for an optional subfolder of the download folder, e.g. services/account."
+        },
+        "jiraToMd.descriptionFormat": {
+          "type": "string",
+          "enum": [
+            "html",
+            "wiki",
+            "auto"
+          ],
+          "default": "html",
+          "enumDescriptions": [
+            "Always HTML, for Jira description fields edited in a rich-text editor.",
+            "Always Jira wiki markup, for the standard Jira editor.",
+            "HTML when the issue's description (or the epic's, for a new issue) is HTML, wiki markup otherwise."
+          ],
+          "description": "The format Push sends the description in."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "esbuild src/extension.js --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node --minify",
+    "vscode:prepublish": "npm run build",
+    "test": "node test/client-test.js && node test/wiki-test.js && node test/html-test.js && node test/file-names-test.js && node test/preview-button-test.js && node test/commands-test.js",
+    "package": "npm run build && vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "3.9.2",
+    "esbuild": "^0.21.5"
+  },
+  "dependencies": {
+    "markdown-it": "^15.0.0"
+  }
+}

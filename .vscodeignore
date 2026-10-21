@@ -1,0 +1,15 @@
+.git/**
+.github/**
+.claude/**
+.vscode/**
+src/**
+test/**
+docs/**
+node_modules/**
+*.vsix
+**/*.map
+.gitignore
+package-lock.json
+**/.DS_Store
+SECURITY.md
+CLAUDE.md

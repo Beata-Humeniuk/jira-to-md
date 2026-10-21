@@ -1,0 +1,410 @@
+const assert = (ok, name) => { if (!ok) { console.error('FAIL: ' + name); process.exit(1); } };
+
+const disk = new Map();
+const info = [];
+const errors = [];
+const warnings = [];
+const answers = {};
+let settings = {};
+let routes = [];
+let docs = [];
+
+function uri(path) {
+  return {
+    scheme: 'file', authority: '', path, fsPath: path,
+    toString: () => 'file://' + path.split('/').map(encodeURIComponent).join('/')
+  };
+}
+
+function joinPath(base, ...parts) {
+  const out = [];
+  for (const segment of (base.path + '/' + parts.join('/')).split('/')) {
+    if (segment === '' || segment === '.') continue;
+    if (segment === '..') out.pop();
+    else out.push(segment);
+  }
+  return uri('/' + out.join('/'));
+}
+
+function openDoc(path, dirty) {
+  const doc = {
+    uri: uri(path),
+    fileName: path,
+    isDirty: !!dirty,
+    saved: 0,
+    getText: () => disk.get(path),
+    positionAt: (offset) => offset,
+    save: async () => { doc.saved++; doc.isDirty = false; return true; }
+  };
+  docs.push(doc);
+  return doc;
+}
+
+function WorkspaceEdit() { this.edits = []; }
+WorkspaceEdit.prototype.replace = function (target, range, text) { this.edits.push({ target, range, text }); };
+
+const vscodeStub = {
+  Uri: { file: uri, joinPath, parse: (t) => uri(t.slice('file://'.length).split('/').map(decodeURIComponent).join('/')) },
+  Range: function Range(start, end) { this.start = start; this.end = end; },
+  WorkspaceEdit,
+  ProgressLocation: { Notification: 15 },
+  FileType: { File: 1, Directory: 2 },
+  window: {
+    activeTextEditor: null,
+    showInformationMessage: (message) => { info.push(message); },
+    showErrorMessage: (message) => { errors.push(message); },
+    showWarningMessage: async (message) => { warnings.push(message); return answers.warning; },
+    showInputBox: async () => answers.input,
+    showQuickPick: async (items) => answers.pick(items),
+    showTextDocument: async () => {},
+    withProgress: (options, task) => task()
+  },
+  workspace: {
+    get textDocuments() { return docs; },
+    openTextDocument: async (target) => {
+      const open = docs.find((d) => d.uri.path === target.path);
+      if (open) return open;
+      if (!disk.has(target.path)) throw new Error('cannot open ' + target.path);
+      return openDoc(target.path);
+    },
+    applyEdit: async (edit) => {
+      for (const e of edit.edits) {
+        const text = disk.get(e.target.path);
+        disk.set(e.target.path, text.slice(0, e.range.start) + e.text + text.slice(e.range.end));
+      }
+      return true;
+    },
+    asRelativePath: (target) => target.path.replace(/^\/w\//, ''),
+    getConfiguration: () => ({ get: (key) => Object.assign({ token: 'T', email: 'a@b.com' }, settings)[key] }),
+    fs: {
+      stat: async (target) => {
+        if (!disk.has(target.path)) throw new Error('EntryNotFound');
+        return {};
+      },
+      readFile: async (target) => {
+        if (!disk.has(target.path)) throw new Error('EntryNotFound: ' + target.path);
+        return Buffer.from(disk.get(target.path), 'utf8');
+      },
+      writeFile: async (target, bytes) => { disk.set(target.path, Buffer.from(bytes).toString('utf8')); },
+      createDirectory: async () => {},
+      readDirectory: async (folder) => {
+        const prefix = folder.path.replace(/\/+$/, '') + '/';
+        const entries = new Map();
+        for (const path of disk.keys()) {
+          if (!path.startsWith(prefix)) continue;
+          const rest = path.slice(prefix.length).split('/');
+          entries.set(rest[0], rest.length > 1 ? 2 : 1);
+        }
+        if (!entries.size) throw new Error('EntryNotFound');
+        return Array.from(entries);
+      }
+    },
+    getWorkspaceFolder: () => null,
+    workspaceFolders: [{ uri: uri('/w') }]
+  },
+  commands: { executeCommand: async () => {} }
+};
+
+const Module = require('module');
+const resolve = Module._resolveFilename;
+Module._resolveFilename = function (request, ...rest) {
+  return request === 'vscode' ? 'vscode' : resolve.call(this, request, ...rest);
+};
+require.cache.vscode = { id: 'vscode', filename: 'vscode', loaded: true, exports: vscodeStub, children: [], paths: [] };
+
+const sent = [];
+global.fetch = async (url, options) => {
+  const method = (options && options.method) || 'GET';
+  const body = options && options.body ? JSON.parse(options.body) : null;
+  sent.push({ method, url: decodeURIComponent(url), body });
+  const route = routes.find((r) => (r.method || 'GET') === method && decodeURIComponent(url).indexOf(r.match) >= 0);
+  const status = route ? (route.status || 200) : 404;
+  const reply = route && (typeof route.body === 'function' ? route.body(body) : route.body);
+  return { ok: status < 300, status, url, json: async () => reply || {} };
+};
+
+const { fetchIssueCommand } = require('../src/fetchCommand');
+const { pullIssueCommand } = require('../src/pullCommand');
+const { publishIssueCommand } = require('../src/publishCommand');
+const { handlePreviewUri } = require('../src/previewActions');
+
+function reset() {
+  disk.clear();
+  info.length = 0;
+  errors.length = 0;
+  warnings.length = 0;
+  sent.length = 0;
+  routes = [];
+  docs = [];
+  settings = { downloadFolder: 'jira', descriptionFormat: 'wiki' };
+  vscodeStub.window.activeTextEditor = null;
+  answers.input = undefined;
+  answers.warning = undefined;
+  answers.pick = (items) => items.filter((i) => i.picked);
+}
+
+const SITE = 'https://acme.atlassian.net';
+const EPIC_TYPE = { name: 'Epic', hierarchyLevel: 1 };
+
+function issue(key, fields) {
+  return {
+    key,
+    fields: Object.assign({
+      summary: 'Summary of ' + key, description: '', updated: '2026-09-01T10:00:00.000+0000',
+      issuetype: { name: 'Story' }, status: { name: 'To Do' }, project: { key: 'PROJ' }
+    }, fields)
+  };
+}
+
+const EPIC = issue('PROJ-1', { summary: 'Login rework', issuetype: EPIC_TYPE });
+const STORY = issue('PROJ-2', {
+  summary: 'Add two-factor login',
+  description: 'h2. Why\nUsers need *stronger* logins.\n\nh2. What Changes\n* Add a TOTP step',
+  parent: { key: 'PROJ-1', fields: { issuetype: EPIC_TYPE } }
+});
+const TASK = issue('PROJ-3', { summary: 'Store TOTP secrets', issuetype: { name: 'Task' } });
+const STORY_FILE = '/w/jira/PROJ-2-add-two-factor-login.md';
+
+function epicRoutes() {
+  return [
+    { match: '/rest/api/2/issue/PROJ-1?', body: EPIC },
+    { match: '/rest/api/2/search/jql?jql=parent = PROJ-1', body: { issues: [STORY, TASK], isLast: true } }
+  ];
+}
+
+async function main() {
+  reset();
+  routes = epicRoutes();
+  answers.input = SITE + '/browse/PROJ-1';
+  let offered = [];
+  answers.pick = (items) => { offered = items; return items.filter((i) => i.picked && i.issue.key !== 'PROJ-1'); };
+  await fetchIssueCommand();
+  assert(!errors.length, 'no errors, got: ' + errors.join(' | '));
+  assert(offered.length === 3 && offered.every((i) => i.picked), 'the epic and its issues are offered, all preselected');
+  const story = disk.get(STORY_FILE);
+  assert(story, 'the story is saved as <KEY>-<summary>.md in the download folder, got: ' + Array.from(disk.keys()).join(', '));
+  assert(story.startsWith('---\njira:\n  url: ' + SITE + '/browse/PROJ-2\n  updated: 2026-09-01T10:00:00.000+0000\nkey: PROJ-2\n'),
+    'the file is bound to the issue, got:\n' + story);
+  assert(story.includes('epic: PROJ-1') && story.includes('generator: jira-to-md@'), 'the epic and the generator are recorded');
+  assert(story.includes('# Add two-factor login\n\n## Why\n\nUsers need **stronger** logins.\n\n## What Changes\n\n- Add a TOTP step\n'),
+    'the description is converted to Markdown, got:\n' + story);
+  assert(disk.get('/w/jira/PROJ-3-store-totp-secrets.md').includes('# Store TOTP secrets'), 'the task is saved next to it');
+  assert(!Array.from(disk.keys()).some((p) => p.includes('PROJ-1')), 'the unpicked epic is not saved');
+  assert(info.some((m) => m.includes('Saved 2 issues to jira/')), 'a summary, got: ' + info.join(' | '));
+
+  reset();
+  disk.set('/w/jira/auth/old-name.md', '---\njira:\n  url: ' + SITE + '/browse/PROJ-2\n  updated: x\n---\n\n# Old\n');
+  routes = [{ match: '/rest/api/2/issue/PROJ-2?', body: STORY }];
+  answers.input = SITE + '/browse/PROJ-2';
+  answers.pick = () => { throw new Error('no picker for a single issue'); };
+  await fetchIssueCommand();
+  assert(!errors.length && !warnings.length, 'a single issue is saved without prompts, got: ' + errors.join(' | '));
+  assert(disk.get('/w/jira/auth/old-name.md').includes('# Add two-factor login') && !disk.has(STORY_FILE),
+    'downloading again refreshes the file already bound to the issue');
+
+  reset();
+  disk.set(STORY_FILE, '## Local draft\n');
+  routes = [{ match: '/rest/api/2/issue/PROJ-2?', body: STORY }];
+  answers.input = SITE + '/browse/PROJ-2';
+  await fetchIssueCommand();
+  assert(warnings.length === 1 && disk.get(STORY_FILE).includes('Local draft'), 'declining keeps a local file of the same name');
+
+  reset();
+  settings = { downloadFolder: '' };
+  vscodeStub.window.activeTextEditor = { document: openDoc('/w/docs/notes.md') };
+  routes = [{ match: '/rest/api/2/issue/PROJ-2?', body: STORY }];
+  answers.input = SITE + '/browse/PROJ-2';
+  await fetchIssueCommand();
+  assert(!errors.length && disk.has('/w/docs/PROJ-2-add-two-factor-login.md'),
+    'an empty download folder means the active file\'s folder, got: ' + Array.from(disk.keys()).join(', '));
+
+  reset();
+  settings = { downloadFolder: 'jira', askSubfolder: true };
+  routes = [{ match: '/rest/api/2/issue/PROJ-2?', body: STORY }];
+  const inputs = ['services/../account', SITE + '/browse/PROJ-2'];
+  const prompts = [];
+  vscodeStub.window.showInputBox = async (options) => { prompts.push(options.prompt); return inputs.shift(); };
+  await fetchIssueCommand();
+  vscodeStub.window.showInputBox = async () => answers.input;
+  assert(prompts[0].includes('subfolder of jira'), 'the subfolder is asked for, got: ' + prompts.join(' | '));
+  assert(!errors.length && disk.has('/w/jira/services/account/PROJ-2-add-two-factor-login.md'),
+    'the issue goes to the subfolder, got: ' + Array.from(disk.keys()).join(', '));
+
+  reset();
+  const LOCAL = '---\njira:\n  url: ' + SITE + '/browse/PROJ-2\n  updated: 2026-09-01T10:00:00.000+0000\nkey: PROJ-2\n' +
+    'owner: team-auth\ngenerated: 2026-01-01\n---\n\n# Add two-factor login\n\nOld body.\n';
+  const FILE = STORY_FILE;
+  disk.set(FILE, LOCAL);
+  routes = [{ match: '/rest/api/2/issue/PROJ-2?', body: issue('PROJ-2', Object.assign({}, STORY.fields, {
+    updated: '2026-09-20T08:00:00.000+0000', description: 'New *body*.'
+  })) }];
+  answers.warning = 'Pull';
+  await pullIssueCommand(uri(FILE));
+  let text = disk.get(FILE);
+  assert(!errors.length, 'no pull errors, got: ' + errors.join(' | '));
+  assert(warnings.length === 1 && warnings[0].includes('2026-09-20'), 'the user is asked first');
+  assert(text.includes('  updated: 2026-09-20T08:00:00.000+0000\n'), 'the binding moves to the pulled timestamp');
+  assert(text.includes('New **body**.') && !text.includes('Old body'), 'content is replaced');
+  assert(text.includes('owner: team-auth') && !text.includes('generated: 2026-01-01'), 'custom keys survive, generated ones refresh');
+  assert(docs[0].saved === 1, 'the document is saved');
+
+  reset();
+  disk.set(FILE, LOCAL);
+  routes = [{ match: '/rest/api/2/issue/PROJ-2?', body: STORY }];
+  await pullIssueCommand(uri(FILE));
+  assert(!warnings.length && info.some((m) => m.includes('Already up to date')), 'up to date, no prompt');
+
+  reset();
+  disk.set(FILE, LOCAL.replace('Old body.', 'Users need **MFA**.\n\n- [ ] 1.1 Add TOTP'));
+  let current = STORY;
+  routes = [
+    { match: '/rest/api/2/issue/PROJ-2?fields=updated', body: () => ({ fields: { updated: '2026-09-25T12:00:00.000+0000' } }) },
+    { match: '/rest/api/2/issue/PROJ-2?', body: () => current },
+    { method: 'PUT', match: '/rest/api/2/issue/PROJ-2', status: 204 }
+  ];
+  await publishIssueCommand(uri(FILE));
+  const put = sent.find((r) => r.method === 'PUT');
+  assert(!errors.length && put, 'the issue is updated, got: ' + errors.join(' | '));
+  assert(put.body.fields.summary === 'Add two-factor login', 'the H1 is the summary');
+  assert(put.body.fields.description === 'Users need *MFA*.\n\n* [ ] 1.1 Add TOTP', 'the body is sent as wiki markup, got: ' + put.body.fields.description);
+  assert(!put.body.update && Object.keys(put.body.fields).length === 2, 'only the summary and the description are sent');
+  assert(disk.get(FILE).includes('  updated: 2026-09-25T12:00:00.000+0000\n'), 'the binding is refreshed');
+
+  reset();
+  disk.set(FILE, LOCAL);
+  current = issue('PROJ-2', Object.assign({}, STORY.fields, { updated: '2026-09-24T00:00:00.000+0000' }));
+  routes = [
+    { match: '/rest/api/2/issue/PROJ-2?', body: () => current },
+    { method: 'PUT', match: '/rest/api/2/issue/PROJ-2', status: 204 }
+  ];
+  await publishIssueCommand(uri(FILE));
+  assert(warnings.length === 1 && warnings[0].includes('changed in Jira'), 'a newer issue is called out');
+  assert(!sent.some((r) => r.method === 'PUT'), 'declining leaves Jira alone');
+
+  reset();
+  const NEW = '/w/notes/audit-log.md';
+  disk.set(NEW, '# Add an audit log\n\n## Why\n\nCompliance.\n');
+  routes = [
+    { match: '/rest/api/2/issue/PROJ-1?', body: EPIC },
+    { method: 'POST', match: '/rest/api/2/issue', body: { id: '100', key: 'PROJ-50' } },
+    { match: '/rest/api/2/issue/PROJ-50?fields=updated', body: { fields: { updated: '2026-09-25T13:00:00.000+0000' } } }
+  ];
+  answers.input = SITE + '/browse/PROJ-1';
+  answers.pick = (items) => items[0];
+  const result = await publishIssueCommand(uri(NEW));
+  const post = sent.find((r) => r.method === 'POST');
+  assert(!errors.length && post, 'the issue is created, got: ' + errors.join(' | '));
+  assert(post.body.fields.project.key === 'PROJ' && post.body.fields.issuetype.name === 'Story' &&
+    post.body.fields.parent.key === 'PROJ-1', 'in the epic\'s project, under the epic');
+  assert(post.body.fields.description === 'h2. Why\n\nCompliance.' && !post.body.fields.labels, 'with the file as description and no labels');
+  assert(result && result.key === 'PROJ-50' && result.action === 'created', 'the result names the new issue');
+  assert(disk.get(NEW).startsWith('---\njira:\n  url: ' + SITE + '/browse/PROJ-50\n  updated: 2026-09-25T13:00:00.000+0000\n---\n\n# Add an audit log'),
+    'the file is bound to the new issue, got:\n' + disk.get(NEW));
+
+  reset();
+  disk.set(NEW, 'No heading here.\n');
+  routes = [
+    { match: '/rest/api/2/issue/PROJ-1?', body: EPIC },
+    { method: 'POST', match: '/rest/api/2/issue', body: { id: '101', key: 'PROJ-51' } },
+    { match: '/rest/api/2/issue/PROJ-51?fields=updated', body: { fields: { updated: '2026-09-25T13:00:00.000+0000' } } }
+  ];
+  answers.input = SITE + '/browse/PROJ-1';
+  answers.pick = (items) => items[0];
+  await publishIssueCommand(uri(NEW));
+  const titled = sent.find((r) => r.method === 'POST');
+  assert(titled && titled.body.fields.summary === 'audit-log', 'without a heading the file name is the summary');
+
+  reset();
+  settings = { downloadFolder: 'jira', descriptionFormat: 'wiki' };
+  const SERVER = 'https://jira.acme.com/jira';
+  const FIELDS = [{ id: 'customfield_10100', name: 'Epic Link', schema: { custom: 'com.pyxis.greenhopper.jira:gh-epic-link' } }];
+  routes = [
+    { match: SERVER + '/rest/api/2/field', body: FIELDS },
+    { match: '/rest/api/2/issue/ABC-1?', body: issue('ABC-1', { issuetype: { name: 'Epic' } }) },
+    { match: '/rest/api/2/search?jql="Epic Link" = ABC-1', body: {
+      total: 1, issues: [issue('ABC-2', { summary: 'Add export', customfield_10100: 'ABC-1' })]
+    } }
+  ];
+  answers.input = SERVER + '/browse/ABC-1';
+  answers.pick = (items) => items.filter((i) => i.issue.key !== 'ABC-1');
+  await fetchIssueCommand();
+  assert(!errors.length, 'server epic downloads, got: ' + errors.join(' | '));
+  const serverFile = disk.get('/w/jira/ABC-2-add-export.md');
+  assert(serverFile && serverFile.includes('url: ' + SERVER + '/browse/ABC-2') && serverFile.includes('epic: ABC-1'),
+    'the epic link names the epic, got: ' + Array.from(disk.keys()).join(', '));
+  assert(sent.every((r) => r.url.indexOf('/search/jql') < 0), 'server uses the classic search');
+
+  reset();
+  disk.set(FILE, LOCAL);
+  const doc = openDoc(FILE, true);
+  current = STORY;
+  routes = [
+    { match: '/rest/api/2/issue/PROJ-2?fields=updated', body: { fields: { updated: '2026-09-25T12:00:00.000+0000' } } },
+    { match: '/rest/api/2/issue/PROJ-2?', body: () => current },
+    { method: 'PUT', match: '/rest/api/2/issue/PROJ-2', status: 204 }
+  ];
+  const push = { path: '/push', query: 'file=' + encodeURIComponent(uri(FILE).toString()) };
+  await handlePreviewUri(push);
+  assert(!sent.some((r) => r.method === 'PUT') && doc.saved === 0, 'declined push neither saves nor pushes');
+  answers.warning = 'Push';
+  await handlePreviewUri(push);
+  assert(doc.saved === 1 && sent.some((r) => r.method === 'PUT'), 'confirmed push saves and pushes');
+  assert(!errors.length, 'no errors on push, got: ' + errors.join(' | '));
+
+  reset();
+  disk.set(FILE, LOCAL);
+  routes = [
+    { match: '/rest/api/2/issue/PROJ-2?fields=updated', body: { fields: { updated: '2026-09-25T12:00:00.000+0000' } } },
+    { match: '/rest/api/2/issue/PROJ-2?', body: STORY },
+    { method: 'PUT', match: '/rest/api/2/issue/PROJ-2', status: 204 }
+  ];
+  answers.warning = 'Push';
+  await handlePreviewUri(push);
+  assert(!errors.length && sent.some((r) => r.method === 'PUT'), 'a preview whose file is not open still pushes, got: ' + errors.join(' | '));
+  reset();
+  await handlePreviewUri({ path: '/push', query: 'file=' + encodeURIComponent(uri('/w/gone.md').toString()) });
+  assert(errors.length === 1 && errors[0].includes('could not be opened'), 'a missing file is reported, got: ' + errors.join(' | '));
+
+  reset();
+  disk.set(FILE, LOCAL);
+  routes = [
+    { match: '/rest/api/2/issue/PROJ-2?', body: STORY },
+    { method: 'PUT', match: '/rest/api/2/issue/PROJ-2', status: 400, body: { errorMessages: [], errors: { summary: 'Summary is required.' } } }
+  ];
+  await publishIssueCommand(uri(FILE)).catch((e) => errors.push(e.message));
+  assert(errors.length === 1 && errors[0] === 'Jira: summary: Summary is required.', 'Jira errors are shown as sent, got: ' + errors.join(' | '));
+
+  reset();
+  settings = {};
+  const RICH = issue('PROJ-8', { summary: 'Package change', description: '<h2 dir="auto">Zmiany</h2>\n<p>Stare.</p>' });
+  const RICH_FILE = '/w/jira/PROJ-8-package-change.md';
+  disk.set(RICH_FILE, '---\njira:\n  url: ' + SITE + '/browse/PROJ-8\n  updated: 2026-09-01T10:00:00.000+0000\n---\n\n' +
+    '# Package change\n\n## Zmiany w procesie:\n\n1. Zmiany w **response**\n');
+  routes = [
+    { match: '/rest/api/2/issue/PROJ-8?fields=updated', body: { fields: { updated: '2026-10-21T09:00:00.000+0000' } } },
+    { match: '/rest/api/2/issue/PROJ-8?', body: RICH },
+    { method: 'PUT', match: '/rest/api/2/issue/PROJ-8', status: 204 }
+  ];
+  await publishIssueCommand(uri(RICH_FILE));
+  const richPut = sent.find((r) => r.method === 'PUT');
+  assert(!errors.length && richPut && richPut.body.fields.description ===
+    '<h2>Zmiany w procesie:</h2>\n<ol>\n<li>Zmiany w <strong>response</strong></li>\n</ol>',
+  'by default the description is pushed as HTML, got: ' + errors.join(' | ') + JSON.stringify(richPut && richPut.body));
+
+  reset();
+  settings = { descriptionFormat: 'auto' };
+  disk.set(FILE, LOCAL.replace('Old body.', 'Users need **MFA**.'));
+  routes = [
+    { match: '/rest/api/2/issue/PROJ-2?fields=updated', body: { fields: { updated: '2026-10-21T09:00:00.000+0000' } } },
+    { match: '/rest/api/2/issue/PROJ-2?', body: STORY },
+    { method: 'PUT', match: '/rest/api/2/issue/PROJ-2', status: 204 }
+  ];
+  await publishIssueCommand(uri(FILE));
+  const autoPut = sent.find((r) => r.method === 'PUT');
+  assert(autoPut && autoPut.body.fields.description === 'Users need *MFA*.',
+    'auto follows a wiki description, got: ' + JSON.stringify(autoPut && autoPut.body));
+
+  console.log('PASS: download, pull and push commands ok');
+}
+
+main().catch((e) => { console.error(e); process.exit(1); });

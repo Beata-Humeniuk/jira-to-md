@@ -1,0 +1,24 @@
+.jira-to-md-actions {
+  float: right;
+  display: flex;
+  gap: 6px;
+  margin: 0 0 8px 12px;
+}
+
+.jira-to-md-actions a {
+  padding: 2px 8px;
+  border: 1px solid var(--vscode-button-border, var(--vscode-widget-border, rgba(127, 127, 127, 0.35)));
+  border-radius: 3px;
+  font-size: 0.85em;
+  line-height: 1.6;
+  color: var(--vscode-button-secondaryForeground, inherit);
+  background: var(--vscode-button-secondaryBackground, transparent);
+  text-decoration: none;
+  opacity: 0.8;
+}
+
+.jira-to-md-actions a:hover {
+  opacity: 1;
+  text-decoration: none;
+  background: var(--vscode-button-secondaryHoverBackground, var(--vscode-button-secondaryBackground, transparent));
+}
