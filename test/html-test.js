@@ -67,6 +67,10 @@ const html = mdToHtml(md);
 assert(html.startsWith('<h2>Zmiany w procesie:</h2>\n<h3>/api/account/package-change/email</h3>'), 'headings go out without anchors, got:\n' + html);
 assert(!/<a name|<a id/.test(html), 'no anchors that the Jira editor shows as flags');
 assert(looksLikeHtml(html) && htmlToMd(html) === md, 'the HTML reads back as the same Markdown, got:\n' + htmlToMd(html));
+assert(html.includes('<table class="confluenceTable" style="border-collapse:collapse" border="1">') &&
+  /<th class="confluenceTh" style="border:1px solid [^"]*padding:4px 8px/.test(html) && /<td class="confluenceTd" style="border:1px solid/.test(html),
+  'tables carry borders and padding for the Jira editor, got:\n' + html);
+assert(mdToHtml('| a |\n|--:|\n| 1 |').includes('text-align:right"'), 'column alignment still wins');
 assert(mdToHtml('') === '' && mdToHtml('<b>x</b>') === '<p>&lt;b&gt;x&lt;/b&gt;</p>', 'raw HTML in Markdown is escaped');
 
 console.log('PASS: html -> markdown ok');

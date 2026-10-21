@@ -3,6 +3,13 @@
 This file lists user-visible changes to Jira to Markdown. The project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.1.1] - 2026-10-21
+
+### Fixed
+
+- Tables pushed as HTML have borders, padding and left-aligned cells, so they
+  are readable in Jira's rich-text editor.
+
 ## [1.1.0] - 2026-10-21
 
 ### Changed
