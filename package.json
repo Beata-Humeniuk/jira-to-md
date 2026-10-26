@@ -2,7 +2,7 @@
   "name": "jira-to-md",
   "displayName": "Jira to Markdown",
   "description": "Download Jira issues and whole epics as Markdown files, edit them in VS Code, and push them back to Jira.",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "publisher": "beatahumeniuk",
   "license": "MIT",
   "author": {
@@ -75,11 +75,13 @@
           "description": "Atlassian account e-mail. Cloud only."
         },
         "jiraToMd.downloadFolder": {
+          "scope": "resource",
           "type": "string",
           "default": "",
           "description": "Where to save issues. Empty = the active file's folder. Relative paths are resolved from the workspace root."
         },
         "jiraToMd.askSubfolder": {
+          "scope": "resource",
           "type": "boolean",
           "default": false,
           "description": "Ask for an optional subfolder of the download folder, e.g. services/account."

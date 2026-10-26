@@ -3,6 +3,14 @@
 This file lists user-visible changes to Jira to Markdown. The project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.2.1] - 2026-10-26
+
+### Fixed
+
+- `jiraToMd.downloadFolder` and `jiraToMd.askSubfolder` set in a folder's
+  settings (`.vscode/settings.json`) are honoured. Before, they were ignored and
+  issues were saved next to the file open in the editor.
+
 ## [1.2.0] - 2026-10-26
 
 ### Changed

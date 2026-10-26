@@ -6,6 +6,7 @@ const errors = [];
 const warnings = [];
 const answers = {};
 let settings = {};
+let folderSettings = {};
 let routes = [];
 let docs = [];
 
@@ -75,7 +76,9 @@ const vscodeStub = {
       return true;
     },
     asRelativePath: (target) => target.path.replace(/^\/w\//, ''),
-    getConfiguration: () => ({ get: (key) => Object.assign({ token: 'T', email: 'a@b.com' }, settings)[key] }),
+    getConfiguration: (section, resource) => ({
+      get: (key) => Object.assign({ token: 'T', email: 'a@b.com' }, settings, resource ? folderSettings : {})[key]
+    }),
     fs: {
       stat: async (target) => {
         if (!disk.has(target.path)) throw new Error('EntryNotFound');
@@ -137,6 +140,7 @@ function reset() {
   routes = [];
   docs = [];
   settings = { downloadFolder: 'jira', descriptionFormat: 'wiki' };
+  folderSettings = {};
   vscodeStub.window.activeTextEditor = null;
   answers.input = undefined;
   answers.warning = undefined;
@@ -229,6 +233,16 @@ async function main() {
   await fetchIssueCommand();
   assert(!errors.length && disk.has('/w/docs/PROJ-2_Add_two-factor_login/PROJ-2_Add_two-factor_login.md'),
     'an empty download folder means the active file\'s folder, got: ' + Array.from(disk.keys()).join(', '));
+
+  reset();
+  settings = { downloadFolder: '' };
+  folderSettings = { downloadFolder: 'specs/jira' };
+  vscodeStub.window.activeTextEditor = { document: openDoc('/w/docs/notes.md') };
+  routes = [{ match: '/rest/api/2/issue/PROJ-2?', body: STORY }];
+  answers.input = SITE + '/browse/PROJ-2';
+  await fetchIssueCommand();
+  assert(!errors.length && disk.has('/w/specs/jira/PROJ-2_Add_two-factor_login/PROJ-2_Add_two-factor_login.md'),
+    'a download folder set in the folder\'s settings is used, got: ' + Array.from(disk.keys()).join(', '));
 
   reset();
   settings = { downloadFolder: 'jira', askSubfolder: true };
