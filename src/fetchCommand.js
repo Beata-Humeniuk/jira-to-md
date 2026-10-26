@@ -47,11 +47,19 @@ async function targetFolder() {
   return segments.length ? vscode.Uri.joinPath(folder, ...segments) : folder;
 }
 
-function filesFor(folder, selected, saved) {
+// New files go to the package folder of the downloaded issue (or epic); one already in a folder keeps it.
+function packageFolder(top, known) {
+  const existing = known.get(top.key);
+  const dir = existing ? existing.split('/').slice(0, -1).join('/') : '';
+  return dir || issueFileName(top.key, top.summary).replace(/\.md$/, '');
+}
+
+function filesFor(folder, top, selected, saved) {
   const known = new Map(saved.filter((s) => s.key).map((s) => [s.key, s.relPath]));
   const owners = new Map(saved.map((s) => [s.relPath, s.key]));
+  const pkg = packageFolder(top, known);
   return selected.map((issue) => {
-    const relPath = known.get(issue.key) || issueFileName(issue.key, issue.summary);
+    const relPath = known.get(issue.key) || pkg + '/' + issueFileName(issue.key, issue.summary);
     const segments = relPath.split('/');
     return {
       relPath,
@@ -101,7 +109,7 @@ async function fetchIssueCommand() {
   const selected = issue.isEpic ? await pickFromEpic(issue, children) : [issue];
   if (!selected.length) return;
 
-  const files = filesFor(folder, selected, await readSavedIssues(folder));
+  const files = filesFor(folder, issue, selected, await readSavedIssues(folder));
   if (!await confirmOverwrite(files)) return;
   for (const file of files) {
     await vscode.workspace.fs.createDirectory(file.dirUri);
