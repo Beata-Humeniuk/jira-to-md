@@ -3,6 +3,16 @@
 This file lists user-visible changes to Jira to Markdown. The project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] - 2026-10-26
+
+### Changed
+
+- Each download is saved as a package: a folder named like the issue, e.g.
+  `PROJ-1_Login_rework/`, holding the issue's file or, for an epic, the epic's
+  file and all its stories and tasks. Files already downloaded stay where they
+  are and are refreshed in place; new issues of an epic join the folder the
+  epic is already saved in.
+
 ## [1.1.1] - 2026-10-21
 
 ### Fixed

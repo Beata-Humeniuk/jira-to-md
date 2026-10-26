@@ -32,13 +32,17 @@ and context path from each link, so you can work with multiple instances.
 4. For an epic, choose which issues to download. The epic and all its stories
    and tasks are preselected.
 
-Each issue is saved as `<KEY>_<Summary_with_underscores>.md` in the download folder:
+Each download is saved as a package: a folder named after the issue you
+pasted, with every issue as `<KEY>_<Summary_with_underscores>.md` inside it:
 
 ```text
 docs/jira/
-  PROJ-1_Login_rework.md
-  PROJ-2_Add_two-factor_login.md
-  PROJ-3_Store_TOTP_secrets.md
+  PROJ-1_Login_rework/
+    PROJ-1_Login_rework.md
+    PROJ-2_Add_two-factor_login.md
+    PROJ-3_Store_TOTP_secrets.md
+  PROJ-7_Fix_typo/
+    PROJ-7_Fix_typo.md
 ```
 
 - The download folder is `jiraToMd.downloadFolder`. When it is empty, issues are
@@ -47,6 +51,7 @@ docs/jira/
   converted from Jira markup or HTML to Markdown.
 - Downloading an issue again refreshes the file it was saved to, even if you
   renamed or moved the file within the download folder.
+  New issues of an epic join the folder the epic is already saved in.
 - A file with the same name that is not bound to the issue is replaced only
   after you confirm.
 
