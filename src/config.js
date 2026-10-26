@@ -2,8 +2,9 @@ const os = require('os');
 const vscode = require('vscode');
 const { parseDownloadFolder } = require('./fileNames');
 
-function settings() {
-  return vscode.workspace.getConfiguration('jiraToMd');
+// With a resource, folder settings (.vscode/settings.json of a workspace folder) apply too.
+function settings(resource) {
+  return vscode.workspace.getConfiguration('jiraToMd', resource);
 }
 
 function workspaceFolderUri(document) {
@@ -17,10 +18,14 @@ function activeDocument() {
   return editor && editor.document && editor.document.uri.scheme === 'file' ? editor.document : null;
 }
 
+function settingsResource(document) {
+  return document ? document.uri : workspaceFolderUri(null);
+}
+
 function downloadFolderUri() {
-  const target = parseDownloadFolder(settings().get('downloadFolder'), os.homedir());
-  if (target.kind === 'absolute') return vscode.Uri.file(target.path);
   const document = activeDocument();
+  const target = parseDownloadFolder(settings(settingsResource(document)).get('downloadFolder'), os.homedir());
+  if (target.kind === 'absolute') return vscode.Uri.file(target.path);
   if (target.kind === 'active') {
     return document ? vscode.Uri.joinPath(document.uri, '..') : workspaceFolderUri(null);
   }
@@ -29,7 +34,7 @@ function downloadFolderUri() {
 }
 
 function askSubfolder() {
-  return settings().get('askSubfolder') === true;
+  return settings(settingsResource(activeDocument())).get('askSubfolder') === true;
 }
 
 function configuredToken() {
