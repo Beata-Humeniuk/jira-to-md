@@ -1,3 +1,5 @@
+const { alertLine } = require('./alerts');
+
 const VOID = new Set(['br', 'hr', 'img', 'input', 'meta', 'link', 'col', 'wbr', 'area', 'base', 'source']);
 const DROP = new Set(['script', 'style', 'head', 'title']);
 const BLOCK = new Set(['p', 'div', 'section', 'article', 'header', 'footer', 'main', 'nav', 'aside', 'figure',
@@ -132,6 +134,10 @@ function indent(text, prefix, first) {
   return text.split('\n').map((l, i) => (i === 0 ? first : l ? prefix : '') + l).join('\n');
 }
 
+function quote(text) {
+  return text.split('\n').map((l) => l ? '> ' + l : '>').join('\n');
+}
+
 function list(node) {
   const ordered = node.tag === 'ol';
   let n = Number(node.attrs.start) || 1;
@@ -151,6 +157,23 @@ function list(node) {
   return items.join('\n');
 }
 
+function escapeHtml(text) {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function toHtml(node) {
+  if (node.text !== undefined) return escapeHtml(decode(node.text).replace(/[\s\u00a0]+/g, ' '));
+  const open = '<' + node.tag + Object.entries(node.attrs).map(([k, v]) => ' ' + k + '="' + escapeHtml(v) + '"').join('') + '>';
+  return VOID.has(node.tag) ? open : open + node.children.map(toHtml).join('') + '</' + node.tag + '>';
+}
+
+// A Markdown cell holds one line of text, so a cell with lists or several paragraphs stays HTML.
+function richCell(cell) {
+  const tags = cell.children.filter((c) => c.tag && BLOCK.has(c.tag));
+  const nested = (n) => (n.children || []).some((c) => ['ul', 'ol', 'pre', 'table', 'blockquote'].includes(c.tag) || nested(c));
+  return tags.length > 1 || nested(cell);
+}
+
 function table(node) {
   const rows = [];
   const collect = (n) => {
@@ -162,7 +185,8 @@ function table(node) {
   collect(node);
   if (!rows.length) return '';
   const cells = rows.map((r) => r.children.filter((c) => c.tag === 'td' || c.tag === 'th')
-    .map((c) => cleanInline(inline(c.children)).replace(/\\\n|\n/g, ' ').replace(/\|/g, '\\|')));
+    .map((c) => (richCell(c) ? c.children.map(toHtml).join('').trim() : cleanInline(inline(c.children)).replace(/\\\n|\n/g, ' '))
+      .replace(/\|/g, '\\|')));
   const width = Math.max(...cells.map((c) => c.length));
   const row = (c) => '| ' + c.concat(Array(width - c.length).fill('')).map((v) => v || ' ').join(' | ') + ' |';
   const head = rows[0].children.some((c) => c.tag === 'th') ? cells.shift() : [];
@@ -188,8 +212,15 @@ function block(node) {
       return [fence + (lang ? lang[1] : '') + '\n' + (text ? text + '\n' : '') + fence];
     }
     case 'blockquote': {
-      const inner = blocks(node.children).join('\n\n');
-      return inner ? [inner.split('\n').map((l) => l ? '> ' + l : '>').join('\n')] : [];
+      const parts = blocks(node.children);
+      const alert = (node.attrs.class || '').match(/\bjira-to-md-alert-(note|tip|important|warning|caution)\b/);
+      if (alert) {
+        const title = parts.length && parts[0].match(/^\*\*([^*\n]+)\*\*$/);
+        if (title) parts.shift();
+        return [quote([alertLine(alert[1].toUpperCase(), title ? title[1] : ''), parts.join('\n\n')].join('\n').trim())];
+      }
+      const inner = parts.join('\n\n');
+      return inner ? [quote(inner)] : [];
     }
     case 'hr': return ['---'];
     case 'table': {

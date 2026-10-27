@@ -1,3 +1,5 @@
+const { alertLine, defaultTitle, FROM_WIKI_PANEL } = require('./alerts');
+
 const BOUNDARY_BEFORE = '(^|[\\s([{>"\'/])';
 const BOUNDARY_AFTER = '(?=$|[\\s)\\]}<.,;:!?"\'/])';
 
@@ -111,6 +113,16 @@ function quoteBlock(lines, i, first) {
   return { md: inner.split('\n').map((l) => l ? '> ' + l : '>'), last };
 }
 
+function panelBlock(lines, i, match) {
+  const [, name, params, first] = match;
+  const kind = FROM_WIKI_PANEL[name];
+  const title = ((params || '').match(/(?:^|\|)\s*title=([^|]*)/) || [])[1];
+  const { body, last } = readBlock(lines, i, first, '{' + name + '}');
+  const inner = wikiToMd(body.join('\n')).replace(/\n+$/, '');
+  const md = [alertLine(kind, (title || '').trim() || defaultTitle(kind)), ...(inner ? inner.split('\n') : [])];
+  return { md: md.map((l) => l ? '> ' + l : '>'), last };
+}
+
 function tableBlock(lines, i) {
   const rows = [];
   while (i < lines.length && lines[i].trim().startsWith('|')) rows.push(lines[i++].trim());
@@ -129,6 +141,8 @@ function singleLineBlock(trimmed) {
 function multiLineBlock(lines, i, trimmed) {
   const code = trimmed.match(/^\{(code|noformat)(?::([^}]*))?\}(.*)$/);
   if (code) return codeBlock(lines, i, code);
+  const panel = trimmed.match(/^\{(info|tip|note|warning)(?::([^}]*))?\}(.*)$/);
+  if (panel) return panelBlock(lines, i, panel);
   if (trimmed.startsWith('{quote}')) return quoteBlock(lines, i, trimmed.slice('{quote}'.length));
   if (trimmed.startsWith('|')) return tableBlock(lines, i);
   return null;

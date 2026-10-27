@@ -74,6 +74,12 @@ assert(md.includes('```\nraw *text*\n```'), 'noformat content is kept verbatim')
 assert(md.includes('> short quote'), 'bq.');
 assert(md.includes('| a | b |') && md.includes('| [link](https://x.io) | `c\\|d` |'), 'table cells split around links and code, got:\n' + md);
 assert(md.includes('[~accountid:123] please check !screenshot.png|thumbnail!'), 'mentions and images stay as written');
+const ALERT = '> [!WARNING] UWAGA\n> Implementacja **później**.\n\n> [!TIP]\n> hi\n';
+const alertWiki = mdToWiki(ALERT);
+assert(alertWiki === '{warning:title=UWAGA}\nImplementacja *później*.\n{warning}\n\n{tip}\nhi\n{tip}', 'alerts become Jira panels, got:\n' + alertWiki);
+assert(wikiToMd(alertWiki) === ALERT, 'Jira panels read back as alerts, got:\n' + wikiToMd(alertWiki));
+assert(wikiToMd('{info:title=Heads up|icon=false}text{info}') === '> [!NOTE] Heads up\n> text\n', 'one-line panels with parameters');
+
 assert(wikiToMd('') === '' && mdToWiki('') === '', 'empty descriptions');
 assert(wikiToMd(null) === '', 'a missing description');
 
