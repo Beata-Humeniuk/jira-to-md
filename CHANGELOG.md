@@ -14,6 +14,15 @@ This file lists user-visible changes to Jira to Markdown. The project follows
   existing attachment is not uploaded again. Only files inside the workspace
   folder are sent, never hidden ones such as `.env`.
 - Pull and repeated downloads point such links back to the local files.
+## [1.3.1] - 2026-10-27
+
+### Fixed
+
+- Merged table cells: a cell holding only `^^` (MultiMarkdown tables, as in
+  Markdown preview extensions) is pushed as a cell spanning rows instead of the
+  text `^^`. Downloaded cells spanning rows become `^^`, so the following cells
+  no longer shift left, and a table with cells spanning columns stays HTML.
+  Wiki markup cannot merge cells, so there the `^^` cell is left empty.
 
 ## [1.3.0] - 2026-10-27
 

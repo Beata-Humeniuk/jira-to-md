@@ -85,4 +85,14 @@ const richHtml = mdToHtml(RICH);
 assert(richHtml.includes('<p>Podczas</p><ul><li data-uuid="1">wartość pola</li></ul></td>'), 'HTML in a table cell stays HTML, got:\n' + richHtml);
 assert(htmlToMd(richHtml) === RICH, 'cells with lists read back as HTML, got:\n' + htmlToMd(richHtml));
 
+const MERGED = '| a | b | c |\n| --- | --- | --- |\n| x | y | 1 |\n| p | ^^ | 2 |\n| q | ^^ | 3 |\n| ^^ | r | 4 |\n';
+const mergedHtml = mdToHtml(MERGED).replace(/ class="[^"]*" style="[^"]*"/g, '');
+assert(mergedHtml.includes('<td>x</td>\n<td rowspan="3">y</td>\n<td>1</td>\n</tr>\n<tr>\n<td>p</td>\n<td>2</td>') &&
+  mergedHtml.includes('<td rowspan="2">q</td>') && !mergedHtml.includes('^^'), '^^ cells merge into the cell above, got:\n' + mergedHtml);
+assert(htmlToMd(mdToHtml(MERGED)) === MERGED, 'row spans read back as ^^, got:\n' + htmlToMd(mdToHtml(MERGED)));
+const COLSPAN = '<table><tr><th colspan="2">a</th></tr><tr><td>1</td><td>2 &amp; 3</td></tr></table>';
+assert(htmlToMd(COLSPAN) === COLSPAN + '\n', 'a table with column spans stays HTML, got:\n' + htmlToMd(COLSPAN));
+assert(mdToHtml(htmlToMd(COLSPAN)) === COLSPAN, 'and goes back to Jira unchanged');
+assert(mdToWiki(MERGED).includes('| p |  | 2 |'), 'wiki tables leave merged cells empty');
+
 console.log('PASS: html -> markdown ok');
