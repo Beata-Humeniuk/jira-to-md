@@ -3,6 +3,15 @@
 This file lists user-visible changes to Jira to Markdown. The project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.4.1] - 2026-10-27
+
+### Fixed
+
+- Cells merged sideways: a cell holding only `<<` merges into the cell on its
+  left and `>>` into the cell on its right, pushed as one cell spanning both
+  columns instead of the text `<<`. Downloaded cells spanning columns become
+  `<<` instead of turning the whole table into HTML.
+
 ## [1.4.0] - 2026-10-27
 
 ### Added

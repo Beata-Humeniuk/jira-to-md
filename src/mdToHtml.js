@@ -30,24 +30,53 @@ function borderedTables(md) {
   return md;
 }
 
-// A cell holding only ^^ (MultiMarkdown tables) merges into the cell above it as a rowspan.
+// Merged cells as in MultiMarkdown-style tables: a cell holding only ^^ merges into the cell above it
+// (rowspan), << into the cell on its left and >> into the cell on its right (colspan).
 function mergedCells(md) {
-  md.core.ruler.push('jira_to_md_rowspan', (state) => {
+  const span = (token, attr) => token.attrSet(attr, String(Number(token.attrGet(attr) || 1) + 1));
+  md.core.ruler.push('jira_to_md_merged_cells', (state) => {
     const tokens = state.tokens;
     const drop = new Set();
     let above = [];
+    let row = 0;
     let col = 0;
+    let left = null;
+    let right = [];
     for (let i = 0; i < tokens.length; i++) {
       const t = tokens[i];
       if (t.type === 'thead_open' || t.type === 'tbody_open') above = [];
-      if (t.type === 'tr_open') col = 0;
+      if (t.type === 'tr_open') {
+        row++;
+        col = 0;
+        left = null;
+        right = [];
+      }
       if (t.type !== 'td_open' && t.type !== 'th_open') continue;
-      const origin = above[col];
-      if (tokens[i + 1].content.trim() === '^^' && origin) {
-        origin.attrSet('rowspan', String(Number(origin.attrGet('rowspan') || 1) + 1));
-        drop.add(i).add(i + 1).add(i + 2);
+      const mark = tokens[i + 1].content.trim();
+      const cell = [i, i + 1, i + 2];
+      if (mark === '^^' && above[col]) {
+        // Several ^^ under one wide cell stretch it once.
+        const origin = above[col];
+        if (origin.meta.spannedRow !== row) span(origin, 'rowspan');
+        origin.meta.spannedRow = row;
+        left = { token: origin, up: true };
+        cell.forEach((n) => drop.add(n));
+      } else if (mark === '<<' && left) {
+        // Next to a ^^ the cell above already covers this one.
+        if (!left.up) span(left.token, 'colspan');
+        above[col] = left.token;
+        cell.forEach((n) => drop.add(n));
+      } else if (mark === '>>') {
+        right.push(cell);
       } else {
-        above[col] = t;
+        t.meta = t.meta || {};
+        for (const pending of right) {
+          span(t, 'colspan');
+          pending.forEach((n) => drop.add(n));
+        }
+        for (let c = col - right.length; c <= col; c++) above[c] = t;
+        right = [];
+        left = { token: t, up: false };
       }
       col++;
     }

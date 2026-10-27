@@ -185,11 +185,12 @@ function table(node) {
   collect(node);
   if (!rows.length) return '';
   const own = (r) => r.children.filter((c) => c.tag === 'td' || c.tag === 'th');
-  // Markdown has no column spans, so such a table stays HTML.
-  if (rows.some((r) => own(r).some((c) => Number(c.attrs.colspan) > 1))) return toHtml(node);
+  const size = (c, attr) => Number(c.attrs[attr]) || 1;
+  // A cell spanning rows and columns at once has no Markdown form, so such a table stays HTML.
+  if (rows.some((r) => own(r).some((c) => size(c, 'rowspan') > 1 && size(c, 'colspan') > 1))) return toHtml(node);
   const text = (c) => (richCell(c) ? c.children.map(toHtml).join('').trim() : cleanInline(inline(c.children)).replace(/\\\n|\n/g, ' '))
     .replace(/\|/g, '\\|');
-  // A row span becomes ^^ in the cells below, as in MultiMarkdown tables.
+  // Spans become ^^ in the cells below and << in the cells to the right, as the preview reads them.
   const spans = [];
   const cells = rows.map((r) => {
     const out = [];
@@ -201,9 +202,9 @@ function table(node) {
     };
     for (const c of own(r)) {
       skipSpanned();
-      const rowspan = Number(c.attrs.rowspan) || 1;
-      if (rowspan > 1) spans[out.length] = rowspan - 1;
+      if (size(c, 'rowspan') > 1) spans[out.length] = size(c, 'rowspan') - 1;
       out.push(text(c));
+      for (let n = 1; n < size(c, 'colspan'); n++) out.push('<<');
     }
     skipSpanned();
     return out;

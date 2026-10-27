@@ -90,9 +90,16 @@ const mergedHtml = mdToHtml(MERGED).replace(/ class="[^"]*" style="[^"]*"/g, '')
 assert(mergedHtml.includes('<td>x</td>\n<td rowspan="3">y</td>\n<td>1</td>\n</tr>\n<tr>\n<td>p</td>\n<td>2</td>') &&
   mergedHtml.includes('<td rowspan="2">q</td>') && !mergedHtml.includes('^^'), '^^ cells merge into the cell above, got:\n' + mergedHtml);
 assert(htmlToMd(mdToHtml(MERGED)) === MERGED, 'row spans read back as ^^, got:\n' + htmlToMd(mdToHtml(MERGED)));
-const COLSPAN = '<table><tr><th colspan="2">a</th></tr><tr><td>1</td><td>2 &amp; 3</td></tr></table>';
-assert(htmlToMd(COLSPAN) === COLSPAN + '\n', 'a table with column spans stays HTML, got:\n' + htmlToMd(COLSPAN));
-assert(mdToHtml(htmlToMd(COLSPAN)) === COLSPAN, 'and goes back to Jira unchanged');
-assert(mdToWiki(MERGED).includes('| p |  | 2 |'), 'wiki tables leave merged cells empty');
+const WIDE = '| Label | Przekierowanie |\n| --- | --- |\n| Nawigacja górna | << |\n| >> | Lista |\n| a | b |\n';
+const wideHtml = mdToHtml(WIDE).replace(/ class="[^"]*" style="[^"]*"/g, '');
+assert(wideHtml.includes('<td colspan="2">Nawigacja górna</td>\n</tr>') && wideHtml.includes('<td colspan="2">Lista</td>') &&
+  !/<<|>>|&lt;&lt;|&gt;&gt;/.test(wideHtml), '<< and >> merge cells sideways, got:\n' + wideHtml);
+assert(htmlToMd(mdToHtml(WIDE)) === WIDE.replace('| >> | Lista |', '| Lista | << |'), 'column spans read back as <<, got:\n' + htmlToMd(mdToHtml(WIDE)));
+const UNDER = mdToHtml('| a | b | c |\n| --- | --- | --- |\n| wide | << | x |\n| ^^ | ^^ | y |\n').replace(/ class="[^"]*" style="[^"]*"/g, '');
+assert(UNDER.includes('<td colspan="2" rowspan="2">wide</td>') && UNDER.includes('<td>y</td>'), '^^ under a wide cell stretches it once, got:\n' + UNDER);
+const BOTH = '<table><tr><th rowspan="2" colspan="2">a</th><th>b</th></tr><tr><td>2 &amp; 3</td></tr></table>';
+assert(htmlToMd(BOTH) === BOTH + '\n', 'a cell spanning rows and columns keeps the table HTML, got:\n' + htmlToMd(BOTH));
+assert(mdToHtml(htmlToMd(BOTH)) === BOTH, 'and goes back to Jira unchanged');
+assert(mdToWiki(MERGED).includes('| p |  | 2 |') && mdToWiki(WIDE).includes('| Nawigacja górna |  |'), 'wiki tables leave merged cells empty');
 
 console.log('PASS: html -> markdown ok');
