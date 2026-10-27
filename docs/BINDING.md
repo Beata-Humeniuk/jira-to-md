@@ -61,10 +61,11 @@ alerts. Raw HTML in the Markdown goes to Jira as HTML, and a downloaded table
 cell holding a list or several paragraphs stays HTML, as a Markdown cell holds
 a single line.
 
-A cell holding only `^^` merges into the cell above it, as in MultiMarkdown
-tables; downloaded cells spanning rows come back that way. Markdown has no
-column spans, so a downloaded table with them stays HTML. Wiki markup cannot
-merge cells: there a `^^` cell is sent empty.
+A cell holding only `^^` merges into the cell above it, `<<` into the cell on its
+left and `>>` into the cell on its right, as Markdown preview extensions read
+them; downloaded merged cells come back as `^^` and `<<`. A table with a cell
+spanning rows and columns at once stays HTML. Wiki markup cannot merge cells:
+there such cells are sent empty.
 
 Jira constructs without a Markdown counterpart — mentions (`[~accountid:…]`),
 attached images (`!file.png!`), colours, `{panel}` — stay in the file as written
