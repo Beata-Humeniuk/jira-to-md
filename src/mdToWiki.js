@@ -122,7 +122,8 @@ function table(tokens, start) {
     if (t.type === 'tr_open') row = [];
     if (t.type === 'th_open') head = true;
     if (t.type === 'td_open') head = false;
-    if (t.type === 'inline') row.push(inline(t.children).replace(/\|/g, '\\|'));
+    // Wiki tables cannot merge cells, so a ^^ cell (merged into the one above) stays empty.
+    if (t.type === 'inline') row.push(t.content.trim() === '^^' ? '' : inline(t.children).replace(/\|/g, '\\|'));
     if (t.type === 'tr_close') {
       const separator = head ? '||' : '|';
       if (!head || row.some((c) => c.trim())) {

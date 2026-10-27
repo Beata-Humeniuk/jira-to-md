@@ -184,9 +184,30 @@ function table(node) {
   };
   collect(node);
   if (!rows.length) return '';
-  const cells = rows.map((r) => r.children.filter((c) => c.tag === 'td' || c.tag === 'th')
-    .map((c) => (richCell(c) ? c.children.map(toHtml).join('').trim() : cleanInline(inline(c.children)).replace(/\\\n|\n/g, ' '))
-      .replace(/\|/g, '\\|')));
+  const own = (r) => r.children.filter((c) => c.tag === 'td' || c.tag === 'th');
+  // Markdown has no column spans, so such a table stays HTML.
+  if (rows.some((r) => own(r).some((c) => Number(c.attrs.colspan) > 1))) return toHtml(node);
+  const text = (c) => (richCell(c) ? c.children.map(toHtml).join('').trim() : cleanInline(inline(c.children)).replace(/\\\n|\n/g, ' '))
+    .replace(/\|/g, '\\|');
+  // A row span becomes ^^ in the cells below, as in MultiMarkdown tables.
+  const spans = [];
+  const cells = rows.map((r) => {
+    const out = [];
+    const skipSpanned = () => {
+      while (spans[out.length] > 0) {
+        spans[out.length]--;
+        out.push('^^');
+      }
+    };
+    for (const c of own(r)) {
+      skipSpanned();
+      const rowspan = Number(c.attrs.rowspan) || 1;
+      if (rowspan > 1) spans[out.length] = rowspan - 1;
+      out.push(text(c));
+    }
+    skipSpanned();
+    return out;
+  });
   const width = Math.max(...cells.map((c) => c.length));
   const row = (c) => '| ' + c.concat(Array(width - c.length).fill('')).map((v) => v || ' ').join(' | ') + ' |';
   const head = rows[0].children.some((c) => c.tag === 'th') ? cells.shift() : [];
