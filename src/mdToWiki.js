@@ -1,4 +1,5 @@
 const MarkdownIt = require('markdown-it');
+const { alerts, defaultTitle, WIKI_PANEL } = require('./alerts');
 
 function inline(tokens) {
   let out = '';
@@ -69,7 +70,9 @@ function blocks(tokens, start, closeType, markers) {
         break;
       case 'blockquote_open': {
         const inner = blocks(tokens, i + 1, 'blockquote_close', markers);
-        out.push('{quote}', ...trimBlank(inner.lines), '{quote}', '');
+        const alert = t.meta && t.meta.alert;
+        const [open, close] = alert ? panel(alert) : ['{quote}', '{quote}'];
+        out.push(open, ...trimBlank(inner.lines), close, '');
         i = inner.next + 1;
         break;
       }
@@ -131,6 +134,12 @@ function table(tokens, start) {
   return { lines: out, next: i + 1 };
 }
 
+function panel(alert) {
+  const name = WIKI_PANEL[alert.kind];
+  const title = alert.title.replace(/[|}]/g, '');
+  return ['{' + name + (title === defaultTitle(alert.kind) ? '' : ':title=' + title) + '}', '{' + name + '}'];
+}
+
 function trimBlank(lines) {
   const out = lines.slice();
   while (out.length && out[out.length - 1] === '') out.pop();
@@ -138,7 +147,7 @@ function trimBlank(lines) {
 }
 
 function mdToWiki(md) {
-  const mdit = new MarkdownIt({ html: false, linkify: true });
+  const mdit = alerts(new MarkdownIt({ html: false, linkify: true }));
   const tokens = mdit.parse(String(md == null ? '' : md), {});
   return trimBlank(blocks(tokens, 0, null, []).lines).join('\n');
 }

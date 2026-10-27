@@ -3,6 +3,19 @@
 This file lists user-visible changes to Jira to Markdown. The project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.3.0] - 2026-10-27
+
+### Changed
+
+- GitHub-style alerts (`> [!WARNING] UWAGA`) are pushed as panels: a coloured
+  quote with a bold title in HTML, `{warning:title=UWAGA}` in wiki markup.
+  Before, Jira showed `[!WARNING]` as text, run together with the next line.
+  Downloaded panels become alerts again.
+- Raw HTML in the Markdown (e.g. a list inside a table cell) is pushed as HTML
+  instead of escaped text, so Jira no longer shows the tags.
+- A downloaded table cell holding a list or several paragraphs stays HTML
+  instead of being flattened into one run of text.
+
 ## [1.2.1] - 2026-10-26
 
 ### Fixed

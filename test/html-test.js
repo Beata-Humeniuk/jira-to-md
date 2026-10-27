@@ -71,6 +71,18 @@ assert(html.includes('<table class="confluenceTable" style="border-collapse:coll
   /<th class="confluenceTh" style="border:1px solid [^"]*padding:4px 8px/.test(html) && /<td class="confluenceTd" style="border:1px solid/.test(html),
   'tables carry borders and padding for the Jira editor, got:\n' + html);
 assert(mdToHtml('| a |\n|--:|\n| 1 |').includes('text-align:right"'), 'column alignment still wins');
-assert(mdToHtml('') === '' && mdToHtml('<b>x</b>') === '<p>&lt;b&gt;x&lt;/b&gt;</p>', 'raw HTML in Markdown is escaped');
+assert(mdToHtml('') === '' && mdToHtml('<b>x</b>') === '<p><b>x</b></p>', 'raw HTML in Markdown goes to Jira as HTML');
+
+const ALERT = '> [!WARNING] UWAGA\n> Implementacja **później**.\n>\n> Drugi akapit\n\n> [!NOTE]\n> hi\n';
+const alertHtml = mdToHtml(ALERT);
+assert(alertHtml.startsWith('<blockquote class="jira-to-md-alert-warning" style="border-left:4px solid') &&
+  alertHtml.includes('<p><strong>UWAGA</strong></p>\n<p>Implementacja <strong>później</strong>.</p>') &&
+  alertHtml.includes('<p><strong>Note</strong></p>\n<p>hi</p>') && !alertHtml.includes('[!'), 'alerts become titled panels, got:\n' + alertHtml);
+assert(htmlToMd(alertHtml) === ALERT, 'alerts read back as alerts, got:\n' + htmlToMd(alertHtml));
+
+const RICH = '| a | b |\n| --- | --- |\n| x | <p>Podczas</p><ul><li data-uuid="1">wartość pola</li></ul> |\n';
+const richHtml = mdToHtml(RICH);
+assert(richHtml.includes('<p>Podczas</p><ul><li data-uuid="1">wartość pola</li></ul></td>'), 'HTML in a table cell stays HTML, got:\n' + richHtml);
+assert(htmlToMd(richHtml) === RICH, 'cells with lists read back as HTML, got:\n' + htmlToMd(richHtml));
 
 console.log('PASS: html -> markdown ok');

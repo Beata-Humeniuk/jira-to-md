@@ -51,12 +51,18 @@ and these constructs survive a round trip unchanged:
 | `- item`, nested lists, `1. item` | `* item`, `** item`, `# item` |
 | `- [ ] 1.1 Task` | `* [ ] 1.1 Task` (the checkbox is text in Jira) |
 | `> quote` | `{quote}…{quote}` |
+| `> [!WARNING] Title` alerts (`NOTE`, `TIP`, `IMPORTANT`, `WARNING`, `CAUTION`) | `{info}`, `{tip}`, `{note}`, `{warning}` panels, `{warning:title=Title}` (`CAUTION` comes back as `WARNING`) |
 | ```` ```lang ```` fences | `{code:lang}` (without a language: `{noformat}`) |
 | Tables | `\|\|head\|\|` and `\|cell\|` rows |
 | `---` | `----` |
 
+In HTML, alerts become a coloured quote with the title in bold and read back as
+alerts. Raw HTML in the Markdown goes to Jira as HTML, and a downloaded table
+cell holding a list or several paragraphs stays HTML, as a Markdown cell holds
+a single line.
+
 Jira constructs without a Markdown counterpart — mentions (`[~accountid:…]`),
-attached images (`!file.png!`), colours, panels — stay in the file as written
+attached images (`!file.png!`), colours, `{panel}` — stay in the file as written
 and go back to Jira unchanged. Panels and colour macros lose their frame.
 
 Edits made in Jira's rich editor on Cloud are stored as Atlassian Document
