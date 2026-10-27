@@ -1,6 +1,6 @@
 const { fetchFields, fetchIssue, searchIssues, isCloud } = require('./jiraClient');
 
-const BASE_FIELDS = ['summary', 'description', 'issuetype', 'status', 'parent', 'updated', 'project'];
+const BASE_FIELDS = ['summary', 'description', 'issuetype', 'status', 'parent', 'updated', 'project', 'attachment'];
 
 async function jiraContext(creds, site) {
   const list = isCloud(site) ? [] : await fetchFields(creds, site);
@@ -37,6 +37,7 @@ function issueOf(ctx, j) {
     updated: f.updated || '',
     project: (f.project && f.project.key) || String(j.key).split('-')[0],
     epic: epicOf(ctx, j),
+    attachments: f.attachment || [],
     isEpic: isEpic(j),
     fields: f,
     site: ctx.site

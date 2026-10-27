@@ -57,6 +57,7 @@ function packageFolder(top, known) {
 function filesFor(folder, top, selected, saved) {
   const known = new Map(saved.filter((s) => s.key).map((s) => [s.key, s.relPath]));
   const owners = new Map(saved.map((s) => [s.relPath, s.key]));
+  const texts = new Map(saved.map((s) => [s.relPath, s.text]));
   const pkg = packageFolder(top, known);
   return selected.map((issue) => {
     const relPath = known.get(issue.key) || pkg + '/' + issueFileName(issue.key, issue.summary);
@@ -67,7 +68,7 @@ function filesFor(folder, top, selected, saved) {
       uri: vscode.Uri.joinPath(folder, ...segments),
       dirUri: vscode.Uri.joinPath(folder, ...segments.slice(0, -1)),
       sameIssue: owners.get(relPath) === issue.key,
-      content: issueDocument(issue)
+      content: issueDocument(issue, owners.get(relPath) === issue.key ? texts.get(relPath) : '')
     };
   });
 }

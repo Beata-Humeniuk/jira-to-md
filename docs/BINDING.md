@@ -68,3 +68,18 @@ and go back to Jira unchanged. Panels and colour macros lose their frame.
 Edits made in Jira's rich editor on Cloud are stored as Atlassian Document
 Format; Jira converts them to wiki markup for the API, so unusual formatting may
 come back simplified.
+
+## Linked files
+
+A link or image pointing at a file next to the Markdown file, e.g.
+`[Configuration](./config/conditions.ts)`, is uploaded on Push as an attachment of
+the issue, and the description links to the attachment (`[text|^conditions.ts]`
+in wiki markup). An attachment with the same name and content is reused instead
+of uploaded again; a changed file is uploaded as a new attachment and the older
+one stays in Jira. Only files inside the workspace folder are sent, and no
+hidden files or folders (`.env`, `.ssh/…`). Links to files that do not exist go
+out unchanged.
+
+Pull, and downloading an issue again into the same file, turn links to those
+attachments back into the local links. A first download keeps the links to the
+attachments in Jira.

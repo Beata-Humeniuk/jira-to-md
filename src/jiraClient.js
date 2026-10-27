@@ -81,17 +81,20 @@ async function rejection(res) {
 
 async function request(cfg, url, opts) {
   opts = opts || {};
-  const headers = { Authorization: authHeader(cfg), Accept: 'application/json' };
+  const headers = { Authorization: authHeader(cfg), Accept: opts.raw ? '*/*' : 'application/json' };
   if (opts.body) headers['Content-Type'] = 'application/json';
+  // Jira refuses uploads without this header as a cross-site request.
+  if (opts.form) headers['X-Atlassian-Token'] = 'no-check';
   const res = await fetch(url, {
     method: opts.method || 'GET',
     headers,
-    body: opts.body ? JSON.stringify(opts.body) : undefined
+    body: opts.form || (opts.body ? JSON.stringify(opts.body) : undefined)
   });
   if (res.status === 401 || res.status === 403) throw new Error('auth');
   if (res.status === 404) throw new Error('not-found');
   if (res.status === 400) throw await rejection(res);
   if (!res.ok) throw new Error('http-' + res.status);
+  if (opts.raw) return Buffer.from(await res.arrayBuffer());
   return res.status === 204 ? {} : res.json();
 }
 
@@ -141,7 +144,19 @@ async function updateIssue(cfg, site, key, body) {
   return apiSend(cfg, site, 'PUT', '/issue/' + encodeURIComponent(key), body);
 }
 
+async function uploadAttachment(cfg, site, key, filename, bytes) {
+  const form = new FormData();
+  form.append('file', new Blob([bytes]), filename);
+  const made = await request(cfg, apiRoot(site) + '/issue/' + encodeURIComponent(key) + '/attachments',
+    { method: 'POST', form });
+  return made[0];
+}
+
+async function downloadAttachment(cfg, url) {
+  return request(cfg, url, { raw: true });
+}
+
 module.exports = {
   parseJiraUrl, hostOf, isCloud, authFor, authHeader, apiRoot, issueWebUrl,
-  fetchFields, fetchIssue, searchIssues, createIssue, updateIssue
+  fetchFields, fetchIssue, searchIssues, createIssue, updateIssue, uploadAttachment, downloadAttachment
 };

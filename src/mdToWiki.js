@@ -1,5 +1,6 @@
 const MarkdownIt = require('markdown-it');
 const { alerts, defaultTitle, WIKI_PANEL } = require('./alerts');
+const { attachmentLinks } = require('./attachments');
 
 function inline(tokens) {
   let out = '';
@@ -146,9 +147,11 @@ function trimBlank(lines) {
   return out;
 }
 
-function mdToWiki(md) {
-  const mdit = alerts(new MarkdownIt({ html: false, linkify: true }));
-  const tokens = mdit.parse(String(md == null ? '' : md), {});
+// links maps local file links to the Jira attachments they were uploaded as: [text|^file] and !file!.
+function mdToWiki(md, links) {
+  const mdit = attachmentLinks(alerts(new MarkdownIt({ html: false, linkify: true })),
+    (attachment, attr) => (attr === 'src' ? '' : '^') + attachment.filename);
+  const tokens = mdit.parse(String(md == null ? '' : md), { links });
   return trimBlank(blocks(tokens, 0, null, []).lines).join('\n');
 }
 

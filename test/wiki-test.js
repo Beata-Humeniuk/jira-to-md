@@ -80,6 +80,11 @@ assert(alertWiki === '{warning:title=UWAGA}\nImplementacja *później*.\n{warnin
 assert(wikiToMd(alertWiki) === ALERT, 'Jira panels read back as alerts, got:\n' + wikiToMd(alertWiki));
 assert(wikiToMd('{info:title=Heads up|icon=false}text{info}') === '> [!NOTE] Heads up\n> text\n', 'one-line panels with parameters');
 
+const links = { './conf/config.ts': { url: 'https://x.io/secure/attachment/1/config.ts', filename: 'config.ts' },
+  './diagram.png': { url: 'https://x.io/secure/attachment/2/diagram.png', filename: 'diagram.png' } };
+assert(mdToWiki('See [the config](./conf/config.ts), ![d](./diagram.png) and [other](./other.ts).', links) ===
+  'See [the config|^config.ts], !diagram.png! and [other|./other.ts].', 'local files link to their attachments');
+
 assert(wikiToMd('') === '' && mdToWiki('') === '', 'empty descriptions');
 assert(wikiToMd(null) === '', 'a missing description');
 

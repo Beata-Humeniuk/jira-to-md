@@ -45,6 +45,7 @@ async function walk(folder, dir, out, depth) {
     out.push({
       uri,
       relPath: dir ? dir + '/' + name : name,
+      text,
       key: meta ? ((parsed && parsed.issueKey) || frontMatterValue(extraLines, 'key')) : ''
     });
   }

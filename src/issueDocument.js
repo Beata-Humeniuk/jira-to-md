@@ -2,6 +2,7 @@ const { serializeFrontMatter, parseFrontMatter } = require('./frontMatter');
 const { issueWebUrl } = require('./jiraClient');
 const { wikiToMd } = require('./wikiToMd');
 const { htmlToMd, looksLikeHtml } = require('./htmlToMd');
+const { relinkLocalFiles } = require('./attachments');
 
 const EXTENSION_VERSION = require('../package.json').version;
 
@@ -20,15 +21,17 @@ function describeLines(issue) {
   return lines;
 }
 
-function content(issue) {
-  const body = looksLikeHtml(issue.description) ? htmlToMd(issue.description) : wikiToMd(issue.description);
+// previousText is the file being replaced: its links to local files survive Push turning them into attachments.
+function content(issue, previousText) {
+  const md = looksLikeHtml(issue.description) ? htmlToMd(issue.description) : wikiToMd(issue.description);
+  const body = previousText ? relinkLocalFiles(md, issue.attachments, parseFrontMatter(previousText).body) : md;
   return '\n# ' + issue.summary + '\n' + (body ? '\n' + body : '');
 }
 
-function issueDocument(issue) {
+function issueDocument(issue, previousText) {
   const fm = serializeFrontMatter(
     { url: issueWebUrl(issue.site, issue.key), updated: issue.updated }, describeLines(issue));
-  return fm + content(issue);
+  return fm + content(issue, previousText);
 }
 
 function topKey(line) {
@@ -53,7 +56,7 @@ function pulledDocument(issue, previousText) {
   const fm = serializeFrontMatter(
     { url: previous.meta.url, updated: issue.updated },
     fresh.concat(keptLines(previous.extraLines, fresh)));
-  return fm + content(issue);
+  return fm + content(issue, previousText);
 }
 
 module.exports = { issueDocument, pulledDocument };
