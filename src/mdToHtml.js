@@ -1,5 +1,6 @@
 const MarkdownIt = require('markdown-it');
 const { alerts } = require('./alerts');
+const { attachmentLinks } = require('./attachments');
 
 const CELL_STYLE = 'border:1px solid #c1c7d0;padding:4px 8px;text-align:left;vertical-align:top';
 
@@ -68,9 +69,11 @@ function alertQuotes(md) {
 }
 
 // Raw HTML is kept: the preview shows it as HTML, so Jira should too, not as escaped tags.
-function mdToHtml(md) {
-  const mdit = mergedCells(alertQuotes(borderedTables(alerts(new MarkdownIt({ html: true, linkify: true })))));
-  return mdit.render(String(md == null ? '' : md)).replace(/\n+$/, '');
+// links maps local file links to the Jira attachments they were uploaded as.
+function mdToHtml(md, links) {
+  const mdit = attachmentLinks(mergedCells(alertQuotes(borderedTables(alerts(new MarkdownIt({ html: true, linkify: true }))))),
+    (attachment) => attachment.url);
+  return mdit.render(String(md == null ? '' : md), { links }).replace(/\n+$/, '');
 }
 
 module.exports = { mdToHtml };

@@ -3,6 +3,17 @@
 This file lists user-visible changes to Jira to Markdown. The project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.4.0] - 2026-10-27
+
+### Added
+
+- Files the description links to, e.g.
+  `[Configuration](./config/conditions.ts)`, are pushed as attachments of the
+  issue and the link points to the attachment, so it no longer leads to a
+  "cannot open the issue" page in Jira. A file whose name and content match an
+  existing attachment is not uploaded again. Only files inside the workspace
+  folder are sent, never hidden ones such as `.env`.
+- Pull and repeated downloads point such links back to the local files.
 ## [1.3.1] - 2026-10-27
 
 ### Fixed

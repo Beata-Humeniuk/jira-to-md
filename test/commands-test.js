@@ -118,12 +118,18 @@ require.cache.vscode = { id: 'vscode', filename: 'vscode', loaded: true, exports
 const sent = [];
 global.fetch = async (url, options) => {
   const method = (options && options.method) || 'GET';
-  const body = options && options.body ? JSON.parse(options.body) : null;
-  sent.push({ method, url: decodeURIComponent(url), body });
+  const raw = options && options.body;
+  const body = raw instanceof FormData
+    ? await Promise.all(raw.getAll('file').map(async (f) => ({ name: f.name, text: await f.text() })))
+    : raw ? JSON.parse(raw) : null;
+  sent.push({ method, url: decodeURIComponent(url), body, headers: (options && options.headers) || {} });
   const route = routes.find((r) => (r.method || 'GET') === method && decodeURIComponent(url).indexOf(r.match) >= 0);
   const status = route ? (route.status || 200) : 404;
   const reply = route && (typeof route.body === 'function' ? route.body(body) : route.body);
-  return { ok: status < 300, status, url, json: async () => reply || {} };
+  return {
+    ok: status < 300, status, url, json: async () => reply || {},
+    arrayBuffer: async () => new TextEncoder().encode(String(reply)).buffer
+  };
 };
 
 const { fetchIssueCommand } = require('../src/fetchCommand');
@@ -429,6 +435,59 @@ async function main() {
   const autoPut = sent.find((r) => r.method === 'PUT');
   assert(autoPut && autoPut.body.fields.description === 'Users need *MFA*.',
     'auto follows a wiki description, got: ' + JSON.stringify(autoPut && autoPut.body));
+
+  reset();
+  settings = {};
+  const LINKED_FILE = '/w/jira/PROJ-8_Package_change/PROJ-8_Package_change.md';
+  const LINKED = '---\njira:\n  url: ' + SITE + '/browse/PROJ-8\n  updated: 2026-09-01T10:00:00.000+0000\n---\n\n' +
+    '# Package change\n\nSee [the config](./conf/config.ts), [the old one](./conf/old.ts), [secrets](./.env), ' +
+    '[outside](../../elsewhere.ts) and [missing](./nope.ts).\n';
+  disk.set(LINKED_FILE, LINKED);
+  disk.set('/w/jira/PROJ-8_Package_change/conf/config.ts', 'export const a = 1;');
+  disk.set('/w/jira/PROJ-8_Package_change/conf/old.ts', 'old');
+  disk.set('/w/jira/PROJ-8_Package_change/.env', 'TOKEN=x');
+  disk.set('/w/elsewhere.ts', 'outside');
+  const OLD = { id: '9', filename: 'old.ts', size: 3, content: SITE + '/secure/attachment/9/old.ts' };
+  const STALE = { id: '8', filename: 'config.ts', size: 19, content: SITE + '/secure/attachment/8/config.ts' };
+  const CONFIG = { id: '10', filename: 'config.ts', size: 19, content: SITE + '/secure/attachment/10/config.ts' };
+  routes = [
+    { match: '/rest/api/2/issue/PROJ-8?fields=updated', body: { fields: { updated: '2026-10-28T09:00:00.000+0000' } } },
+    { match: '/rest/api/2/issue/PROJ-8?fields=attachment', body: { fields: { attachment: [STALE, OLD] } } },
+    { match: '/rest/api/2/issue/PROJ-8?', body: RICH },
+    { match: '/secure/attachment/8/config.ts', body: 'export const a = 2;' },
+    { match: '/secure/attachment/9/old.ts', body: 'old' },
+    { method: 'POST', match: '/rest/api/2/issue/PROJ-8/attachments', body: [CONFIG] },
+    { method: 'PUT', match: '/rest/api/2/issue/PROJ-8', status: 204 }
+  ];
+  await publishIssueCommand(uri(LINKED_FILE));
+  const uploads = sent.filter((r) => r.method === 'POST');
+  const linkedPut = sent.find((r) => r.method === 'PUT');
+  assert(!errors.length && uploads.length === 1 && uploads[0].body.length === 1 &&
+    uploads[0].body[0].name === 'config.ts' && uploads[0].body[0].text === 'export const a = 1;' &&
+    uploads[0].headers['X-Atlassian-Token'] === 'no-check',
+  'a changed linked file is uploaded once; same content is reused, hidden and outside files are not, got: ' +
+    errors.join(' | ') + JSON.stringify(uploads.map((u) => u.body)));
+  const linkedHtml = linkedPut.body.fields.description;
+  assert(linkedHtml.includes('<a href="' + CONFIG.content + '">the config</a>') &&
+    linkedHtml.includes('<a href="' + OLD.content + '">the old one</a>') &&
+    linkedHtml.includes('<a href="./.env">') && linkedHtml.includes('<a href="./nope.ts">'),
+  'links point at the attachments, got: ' + linkedHtml);
+  assert(info.some((m) => m.includes('Attached config.ts.')), 'the upload is reported, got: ' + info.join(' | '));
+
+  reset();
+  disk.set(LINKED_FILE, LINKED);
+  const linkedIssue = issue('PROJ-8', { summary: 'Package change', description: linkedHtml, attachment: [CONFIG, OLD],
+    updated: '2026-10-28T09:00:00.000+0000' });
+  routes = [{ match: '/rest/api/2/issue/PROJ-8?', body: linkedIssue }];
+  answers.warning = 'Pull';
+  await pullIssueCommand(uri(LINKED_FILE));
+  const pulled = disk.get(LINKED_FILE);
+  assert(!errors.length && pulled.includes('See [the config](./conf/config.ts), [the old one](./conf/old.ts), [secrets](./.env)'),
+    'after a pull the links lead to the local files again, got:\n' + pulled);
+
+  const { relinkLocalFiles } = require('../src/attachments');
+  assert(relinkLocalFiles('[cfg|^config.ts] and [^old.ts] and [x|^other.ts]', [], '[a](./conf/config.ts) [b](./conf/old.ts)') ===
+    '[cfg](./conf/config.ts) and [old.ts](./conf/old.ts) and [x|^other.ts]', 'wiki attachment links go back to local files');
 
   console.log('PASS: download, pull and push commands ok');
 }
