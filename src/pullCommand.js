@@ -12,7 +12,7 @@ async function confirmPull(document, localUpdated, remoteUpdated) {
   const picked = await vscode.window.showWarningMessage(
     'Update "' + vscode.workspace.asRelativePath(document.uri, false) + '" from Jira (changed ' +
     remoteUpdated + (localUpdated ? ', your copy is from ' + localUpdated : '') + ')? The file content is replaced' +
-    (document.isDirty ? ', including your unsaved changes.' : '; changes you have not pushed are lost.'),
+    (document.isDirty ? ', including your unsaved changes.' : '; changes you have not published are lost.'),
     { modal: true }, pull);
   return picked === pull;
 }

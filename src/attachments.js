@@ -1,3 +1,4 @@
+const { posix } = require('path');
 const MarkdownIt = require('markdown-it');
 
 const SCHEME = /^[a-z][a-z0-9+.-]*:/i;
@@ -70,4 +71,16 @@ function relinkLocalFiles(md, attachments, previousBody) {
   });
 }
 
-module.exports = { localTargets, attachmentLinks, relinkLocalFiles };
+// Relative links and images of a file copied from fromDir to toDir point at the same files again.
+function rebaseLinks(md, fromDir, toDir) {
+  if (fromDir === toDir) return String(md);
+  return String(md).replace(/(\]\(\s*<?)([^()\s<>]+)/g, (m, open, href) => {
+    if (!isLocal(href)) return m;
+    const at = href.search(/[?#]/);
+    const path = at < 0 ? href : href.slice(0, at);
+    const rest = at < 0 ? '' : href.slice(at);
+    return open + (posix.relative(toDir, posix.join(fromDir, path)) || '.') + rest;
+  });
+}
+
+module.exports = { localTargets, attachmentLinks, relinkLocalFiles, rebaseLinks };
