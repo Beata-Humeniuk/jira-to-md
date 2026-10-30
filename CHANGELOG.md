@@ -3,6 +3,29 @@
 This file lists user-visible changes to Jira to Markdown. The project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.5.0] - 2026-10-30
+
+### Added
+
+- Publishing a file that is not bound to an issue accepts a link to an existing
+  issue: the file replaces its description, e.g. of an issue created with an
+  empty one, and is bound to it. The issue's summary can stay as it is. A link
+  to an epic asks whether to create an issue in it or replace its description.
+- A file published from outside the download folder, e.g. one downloaded from
+  Confluence, is also saved in the download folder, in the issue's package,
+  like a download. A file of the issue already there is refreshed.
+- A file without a binding shows **↑ Publish to Jira** in its Markdown preview.
+
+### Changed
+
+- Push is now called Publish: **Jira: Publish Issue** and **↑ Publish to Jira**.
+  The preview buttons say where they go: **↻ Pull from Jira**.
+
+### Fixed
+
+- A file bound to both a Confluence page and a Jira issue keeps both bindings.
+  Before, the Jira binding could take the Confluence page's address.
+
 ## [1.4.1] - 2026-10-27
 
 ### Fixed

@@ -1,6 +1,6 @@
 # Jira to Markdown
 
-Download Jira issues as Markdown files, edit them in VS Code, and push them
+Download Jira issues as Markdown files, edit them in VS Code, and publish them
 back to Jira. Download a single issue, or a whole epic with all its stories and
 tasks. The extension works with Jira Cloud and Server/Data Center.
 
@@ -57,25 +57,44 @@ docs/jira/
 
 ## Update a file from Jira
 
-Open the Markdown preview: a file bound to an issue shows a small **↻ Pull**
-button in its top right corner. You can also run **Jira: Pull Issue**.
+Open the Markdown preview: a file bound to an issue shows a small **↻ Pull from
+Jira** button in its top right corner. You can also run **Jira: Pull Issue**.
 
 The extension compares the issue's last-updated time first. If nothing changed,
 nothing happens. Otherwise it asks before replacing the file content, because
-edits you have not pushed are lost. Your own front matter keys are kept.
+edits you have not published are lost. Your own front matter keys are kept.
 
-## Push to Jira
+## Publish to Jira
 
-Open the Markdown file and run **Jira: Push Issue**, or click **↑ Push** in the
-Markdown preview of a bound file; it asks first and saves unsaved edits.
+Open the Markdown file and run **Jira: Publish Issue**, or click **↑ Publish to
+Jira** in the Markdown preview. For a bound file the button asks first and saves
+unsaved edits.
 
 - **A bound file** (with a `jira:` block) updates its issue: the `#` heading
   becomes the summary and the rest the description. If the issue changed in
-  Jira since your last download or push, the extension asks before
+  Jira since your last download or publish, the extension asks before
   overwriting it.
-- **An unbound file** creates an issue. Paste a link to the epic it belongs to,
-  or to a project, and choose Story or Task. Without a `#` heading, the file
-  name is the summary.
+- **An unbound file** asks for a link:
+  - **an issue** — the file replaces the issue's description, e.g. of an issue
+    created with an empty one. You choose whether its summary stays or becomes
+    the file's `#` heading. A kept summary stays on later publishes too.
+  - **an epic** — choose between a new Story or Task in the epic and replacing
+    the epic's description.
+  - **a project** — a new Story or Task in the project. Without a `#` heading,
+    the file name is the summary.
+
+  The file is bound to the issue, so later publishes update it without asking
+  for the link again.
+
+A file published from outside `jiraToMd.downloadFolder`, e.g. a page downloaded
+by Confluence to Markdown or a document elsewhere in the repository, is also
+saved in the download folder, as a download would save it: the issue's file
+there is refreshed, or a new one is made in the epic's or the issue's own
+package. Its relative links are adjusted to point at the same files. The file
+you published stays where it is.
+
+A file can be bound to a Jira issue and a Confluence page at once, so one file
+can be published to both.
 
 The description is sent as HTML by default, which suits description fields
 edited in a rich-text editor. Set `jiraToMd.descriptionFormat` to `wiki` for
@@ -92,7 +111,7 @@ the Markdown that survives a round trip.
 | `jiraToMd.email` | — | Atlassian account e-mail. Cloud only. |
 | `jiraToMd.downloadFolder` | — | Where to save issues. Empty = the active file's folder. Relative paths start at the workspace root; `~` and absolute paths work too. |
 | `jiraToMd.askSubfolder` | `false` | Ask for an optional subfolder of the download folder, e.g. `services/account`. |
-| `jiraToMd.descriptionFormat` | `html` | How Push writes the description: `html` for fields edited in a rich-text editor, `wiki` for the standard Jira wiki markup, `auto` to follow the issue's current format. |
+| `jiraToMd.descriptionFormat` | `html` | How Publish writes the description: `html` for fields edited in a rich-text editor, `wiki` for the standard Jira wiki markup, `auto` to follow the issue's current format. |
 
 The token is stored in VS Code settings, which may be synced or shared.
 Restricted Mode is supported.
@@ -100,7 +119,7 @@ Restricted Mode is supported.
 ## API for other extensions
 
 `jiraToMd.publishIssue` takes an optional `vscode.Uri` of a Markdown file and
-pushes that file, read from disk, without opening it:
+publishes that file, read from disk, without opening it:
 
 ```js
 const result = await vscode.commands.executeCommand('jiraToMd.publishIssue', fileUri);
@@ -108,12 +127,12 @@ const result = await vscode.commands.executeCommand('jiraToMd.publishIssue', fil
 
 | Outcome | Result |
 |---|---|
-| Pushed | `{ url: string, key: string, action: "created" \| "updated" }` |
+| Published | `{ url: string, key: string, action: "created" \| "updated" }` |
 | A prompt was cancelled | `undefined` |
 | Failed | Rejects with an `Error`; `message` is ready to show to the user |
 
-Prompts still appear when they are needed — for the token, the parent epic, or
-an issue that changed in Jira — so call this only where a person can answer
+Prompts still appear when they are needed — for the token, the issue or epic
+to publish to, or an issue that changed in Jira — so call this only where a person can answer
 them.
 
 [MIT License](LICENSE) · [Changelog](CHANGELOG.md)

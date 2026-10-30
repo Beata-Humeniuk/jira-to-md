@@ -33,6 +33,16 @@ function downloadFolderUri() {
   return base ? vscode.Uri.joinPath(base, ...target.segments) : null;
 }
 
+// The download folder for a file published from elsewhere; null when it is "next to the active file".
+function packageRootUri(resource) {
+  const target = parseDownloadFolder(settings(resource).get('downloadFolder'), os.homedir());
+  if (target.kind === 'absolute') return vscode.Uri.file(target.path);
+  if (target.kind === 'active') return null;
+  const own = resource && vscode.workspace.getWorkspaceFolder(resource);
+  const base = own ? own.uri : workspaceFolderUri(null);
+  return base ? vscode.Uri.joinPath(base, ...target.segments) : null;
+}
+
 function askSubfolder() {
   return settings(settingsResource(activeDocument())).get('askSubfolder') === true;
 }
@@ -51,4 +61,4 @@ function descriptionFormat() {
   return value === 'wiki' || value === 'auto' ? value : 'html';
 }
 
-module.exports = { downloadFolderUri, askSubfolder, configuredToken, configuredEmail, descriptionFormat };
+module.exports = { downloadFolderUri, packageRootUri, askSubfolder, configuredToken, configuredEmail, descriptionFormat };

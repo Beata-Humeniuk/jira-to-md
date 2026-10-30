@@ -26,19 +26,25 @@ managed: true
 ```
 
 - `url` names the issue. `updated` is the issue's last-change time in Jira when
-  the file was downloaded or pushed; Push and Pull compare it with Jira to
-  notice changes made there meanwhile.
+  the file was downloaded or published; Publish and Pull compare it with Jira
+  to notice changes made there meanwhile.
 - `key`, `issueType`, `status`, and `epic` describe the issue at the last
   download. They are refreshed by Pull and not sent to Jira.
+- `keepSummary: true` is added when you published the file to an existing issue
+  and kept the issue's summary. Publish then sends only the description, and
+  Pull keeps the file's own `#` heading.
 - Keys you add yourself are kept by Pull.
 
 The first `#` heading is the issue summary. If there is none, the file name is
 used.
 
+A `confluence:` block of Confluence to Markdown can stand next to the `jira:`
+block; each extension reads and rewrites only its own.
+
 ## Markdown ↔ Jira markup
 
 Descriptions go through REST API v2, which Cloud and Server/Data Center both
-support. Download reads both Jira wiki markup and HTML. Push writes HTML by
+support. Download reads both Jira wiki markup and HTML. Publish writes HTML by
 default; with `jiraToMd.descriptionFormat` set to `wiki` it writes wiki markup,
 and these constructs survive a round trip unchanged:
 
@@ -78,7 +84,7 @@ come back simplified.
 ## Linked files
 
 A link or image pointing at a file next to the Markdown file, e.g.
-`[Configuration](./config/conditions.ts)`, is uploaded on Push as an attachment of
+`[Configuration](./config/conditions.ts)`, is uploaded on Publish as an attachment of
 the issue, and the description links to the attachment (`[text|^conditions.ts]`
 in wiki markup). An attachment with the same name and content is reused instead
 of uploaded again; a changed file is uploaded as a new attachment and the older

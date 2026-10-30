@@ -1,8 +1,8 @@
 {
   "name": "jira-to-md",
   "displayName": "Jira to Markdown",
-  "description": "Download Jira issues and whole epics as Markdown files, edit them in VS Code, and push them back to Jira.",
-  "version": "1.4.1",
+  "description": "Download Jira issues and whole epics as Markdown files, edit them in VS Code, and publish them back to Jira.",
+  "version": "1.5.0",
   "publisher": "beatahumeniuk",
   "license": "MIT",
   "author": {
@@ -48,7 +48,7 @@
       },
       {
         "command": "jiraToMd.publishIssue",
-        "title": "Push Issue",
+        "title": "Publish Issue",
         "category": "Jira"
       },
       {
