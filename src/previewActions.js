@@ -2,14 +2,16 @@ const vscode = require('vscode');
 const { pullIssueCommand } = require('./pullCommand');
 const { publishIssueCommand } = require('./publishCommand');
 const { fileUriCandidates } = require('./previewButton');
+const { parseFrontMatter } = require('./frontMatter');
 
-async function pushFromPreview(document) {
-  const push = 'Push';
-  const picked = await vscode.window.showWarningMessage(
-    'Push "' + vscode.workspace.asRelativePath(document.uri, false) + '" to Jira?' +
+// A bound file is published at once, so it asks first; an unbound one asks where to go anyway.
+async function publishFromPreview(document) {
+  const publish = 'Publish';
+  const picked = !parseFrontMatter(document.getText()).meta ? publish : await vscode.window.showWarningMessage(
+    'Publish "' + vscode.workspace.asRelativePath(document.uri, false) + '" to Jira?' +
     (document.isDirty ? ' Your unsaved changes are saved first.' : ''),
-    { modal: true }, push);
-  if (picked !== push) return;
+    { modal: true }, publish);
+  if (picked !== publish) return;
   try {
     if (document.isDirty && !await document.save()) return;
     await publishIssueCommand(document.uri);
@@ -20,7 +22,9 @@ async function pushFromPreview(document) {
 
 const ACTIONS = {
   '/pull': (document) => pullIssueCommand(document.uri),
-  '/push': pushFromPreview
+  '/publish': publishFromPreview,
+  // Previews rendered before the button was renamed.
+  '/push': publishFromPreview
 };
 
 // A preview restored after a window reload has no text document behind it, so the file is opened from disk.

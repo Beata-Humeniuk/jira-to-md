@@ -7,13 +7,18 @@ const { parseFrontMatter, serializeFrontMatter } = require('./frontMatter');
 const {
   parseJiraUrl, isCloud, issueWebUrl, fetchIssue, createIssue, updateIssue, uploadAttachment, downloadAttachment
 } = require('./jiraClient');
-const { localTargets } = require('./attachments');
+const { localTargets, rebaseLinks } = require('./attachments');
 const { contextAndIssue } = require('./issues');
+const { issueFileName } = require('./fileNames');
+const { publishedDocument } = require('./issueDocument');
+const { readSavedIssues, confirmOverwrite } = require('./savedIssues');
 const { credentialsFor } = require('./credentials');
 const { errorMessage } = require('./messages');
-const { descriptionFormat } = require('./config');
+const { descriptionFormat, packageRootUri } = require('./config');
 
 const ISSUE_TYPES = ['Story', 'Task'];
+const REPLACE_DESCRIPTION = 'Replace the description';
+const REPLACE_BOTH = 'Replace the description and the summary';
 
 function baseName(path) {
   return String(path || '').split(/[\\/]/).pop() || '';
@@ -124,6 +129,48 @@ async function writeBinding(source, meta) {
   });
 }
 
+function dirOf(path) {
+  return path.split('/').slice(0, -1).join('/');
+}
+
+function packageName(issue) {
+  return issueFileName(issue.key, issue.summary).replace(/\.md$/, '');
+}
+
+// Where Download would put the issue: the file already bound to it, else the folder of its saved
+// epic, else a package of its own (or of the epic it was just created in).
+function packagePath(issue, epic, saved) {
+  const known = new Map(saved.filter((s) => s.key).map((s) => [s.key, s.relPath]));
+  if (known.has(issue.key)) return known.get(issue.key);
+  const epicPath = issue.epic && known.get(issue.epic);
+  const dir = (epicPath && dirOf(epicPath)) || packageName(epic || issue);
+  return dir + '/' + issueFileName(issue.key, issue.summary);
+}
+
+// A file published from outside the download folder is also saved there, in the issue's package,
+// like a download: the issue's file there is refreshed, or a new one made.
+async function saveToPackage(source, issue, epic, content) {
+  const root = packageRootUri(source.uri);
+  if (!root || source.uri.path.startsWith(root.path.replace(/\/+$/, '') + '/')) return null;
+  const saved = await readSavedIssues(root);
+  const relPath = packagePath(issue, epic, saved);
+  const segments = relPath.split('/');
+  const uri = vscode.Uri.joinPath(root, ...segments);
+  const previous = saved.find((s) => s.relPath === relPath);
+  const sameIssue = !!previous && previous.key === issue.key;
+  if (!await confirmOverwrite([{ uri, relPath, sameIssue }])) return null;
+  const toDir = vscode.Uri.joinPath(root, ...segments.slice(0, -1));
+  const markdown = rebaseLinks(content, vscode.Uri.joinPath(source.uri, '..').path, toDir.path);
+  await vscode.workspace.fs.createDirectory(toDir);
+  await vscode.workspace.fs.writeFile(uri,
+    Buffer.from(publishedDocument(issue, markdown, sameIssue ? previous.text : ''), 'utf8'));
+  return uri;
+}
+
+function savedNote(uri) {
+  return uri ? ' Saved to ' + vscode.workspace.asRelativePath(uri, false) + '.' : '';
+}
+
 async function publishUpdate(source, meta, title, content) {
   const parsed = parseJiraUrl(meta.url);
   if (!parsed || !parsed.issueKey) throw new Error('bad-url');
@@ -140,39 +187,75 @@ async function publishUpdate(source, meta, title, content) {
     if (picked !== overwrite) return;
   }
 
-  const { updated, uploaded } = await withNotification('Pushing ' + current.key + ' to Jira…', async () => {
+  const summary = meta.keepSummary ? current.summary : title;
+  const { updated, uploaded } = await withNotification('Publishing ' + current.key + ' to Jira…', async () => {
     const { links, uploaded: names } = await attachLinkedFiles(creds, parsed.site, current.key, source, content);
     const description = descriptionFor(content, current.fields.description, links);
-    await updateIssue(creds, parsed.site, current.key, { fields: { summary: title, description } });
+    const fields = meta.keepSummary ? { description } : { summary, description };
+    await updateIssue(creds, parsed.site, current.key, { fields });
     return { updated: await fetchIssue(creds, parsed.site, current.key, ['updated']), uploaded: names };
   });
 
-  await writeBinding(source, { url: meta.url, updated: updated.fields.updated });
-  vscode.window.showInformationMessage('Pushed ' + current.key + ' "' + title + '".' + attachedNote(uploaded));
+  await writeBinding(source, Object.assign({}, meta, { updated: updated.fields.updated }));
+  const copy = await saveToPackage(source,
+    Object.assign({}, current, { summary, updated: updated.fields.updated }), null, content);
+  vscode.window.showInformationMessage('Published ' + current.key + ' "' + summary + '".' +
+    attachedNote(uploaded) + savedNote(copy));
   return { url: meta.url, key: current.key, action: 'updated' };
 }
 
-async function askForParent() {
-  const parentUrl = await vscode.window.showInputBox({
-    prompt: 'New issue — paste a link to the epic it belongs to, or to the project',
-    placeHolder: 'https://…/browse/PROJ-1',
+async function askForTarget() {
+  const targetUrl = await vscode.window.showInputBox({
+    prompt: 'Paste a link to the Jira issue whose description this file replaces — ' +
+      'or to an epic or a project to create a new issue in',
+    placeHolder: 'https://…/browse/PROJ-12',
     ignoreFocusOut: true
   });
-  if (!parentUrl) return null;
-  const parsed = parseJiraUrl(parentUrl);
-  if (!parsed) throw new Error('bad-parent');
+  if (!targetUrl) return null;
+  const parsed = parseJiraUrl(targetUrl);
+  if (!parsed) throw new Error('bad-target');
   return parsed;
 }
 
+async function pickEpicAction(epic, title) {
+  const create = { label: 'Create a new issue in epic ' + epic.key, description: '"' + title + '"' };
+  const replace = { label: 'Replace the description of epic ' + epic.key, description: '"' + epic.summary + '"' };
+  const picked = await vscode.window.showQuickPick([create, replace],
+    { placeHolder: epic.key + ' is an epic — what should "' + title + '" do?', ignoreFocusOut: true });
+  return picked ? (picked === create ? 'create' : 'replace') : null;
+}
+
+// Binds the file to an issue that already exists, e.g. one created with an empty description.
+async function replaceExisting(source, target, title, content) {
+  const empty = !target.description.trim();
+  const buttons = title === target.summary ? [REPLACE_DESCRIPTION] : [REPLACE_DESCRIPTION, REPLACE_BOTH];
+  const picked = await vscode.window.showWarningMessage(
+    'Publish this file as the description of ' + target.key + ' "' + target.summary + '"? ' +
+    (empty ? 'Its description is empty.' : 'Its current description is replaced.') +
+    (buttons.length > 1 ? ' Keep its summary, or replace it with "' + title + '"?' : '') +
+    ' The file is bound to the issue, so later publishes update it.',
+    { modal: true }, ...buttons);
+  if (!picked) return;
+  const meta = { url: issueWebUrl(target.site, target.key), updated: target.updated };
+  if (picked === REPLACE_DESCRIPTION && buttons.length > 1) meta.keepSummary = true;
+  return publishUpdate(source, meta, title, content);
+}
+
 async function publishNew(source, title, content) {
-  const parsed = await askForParent();
+  const parsed = await askForTarget();
   if (!parsed) return;
   const creds = await credentialsFor(parsed.site);
   if (!creds) return;
 
-  const { ctx, issue: epic } = await withNotification('Checking the parent in Jira…',
+  const { ctx, issue: target } = await withNotification('Checking the issue in Jira…',
     () => contextAndIssue(creds, parsed.site, parsed.issueKey));
-  if (epic && !epic.isEpic) throw new Error('bad-parent');
+  if (target && !target.isEpic) return replaceExisting(source, target, title, content);
+  if (target) {
+    const action = await pickEpicAction(target, title);
+    if (!action) return;
+    if (action === 'replace') return replaceExisting(source, target, title, content);
+  }
+  const epic = target;
 
   const type = await vscode.window.showQuickPick(ISSUE_TYPES,
     { placeHolder: 'Issue type for "' + title + '"', ignoreFocusOut: true });
@@ -202,15 +285,18 @@ async function publishNew(source, title, content) {
 
   const url = issueWebUrl(parsed.site, created.key);
   await writeBinding(source, { url, updated: created.updated });
+  const copy = await saveToPackage(source, {
+    key: created.key, summary: title, type, updated: created.updated, epic: epic ? epic.key : '', site: parsed.site
+  }, epic, content);
   vscode.window.showInformationMessage('Created ' + created.key + ' "' + title + '"' +
-    (epic ? ' in epic ' + epic.key : '') + '.' + attachedNote(created.uploaded));
+    (epic ? ' in epic ' + epic.key : '') + '.' + attachedNote(created.uploaded) + savedNote(copy));
   return { url, key: created.key, action: 'created' };
 }
 
 async function publishIssueCommand(fileUri) {
   const editor = fileUri ? null : vscode.window.activeTextEditor;
   if (!fileUri && !editor) {
-    vscode.window.showErrorMessage('Open the Markdown file you want to push to Jira.');
+    vscode.window.showErrorMessage('Open the Markdown file you want to publish to Jira.');
     return;
   }
 

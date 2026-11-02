@@ -22,10 +22,14 @@ function describeLines(issue) {
 }
 
 // previousText is the file being replaced: its links to local files survive Push turning them into attachments.
-function content(issue, previousText) {
+function withTitle(title, body) {
+  return '\n# ' + title + '\n' + (body ? '\n' + body : '');
+}
+
+function content(issue, previousText, title) {
   const md = looksLikeHtml(issue.description) ? htmlToMd(issue.description) : wikiToMd(issue.description);
   const body = previousText ? relinkLocalFiles(md, issue.attachments, parseFrontMatter(previousText).body) : md;
-  return '\n# ' + issue.summary + '\n' + (body ? '\n' + body : '');
+  return withTitle(title || issue.summary, body);
 }
 
 function issueDocument(issue, previousText) {
@@ -50,13 +54,24 @@ function keptLines(previousLines, freshLines) {
   return kept;
 }
 
+// A file whose binding keeps its summary (its title is a Confluence page's, say) keeps its own heading.
 function pulledDocument(issue, previousText) {
   const previous = parseFrontMatter(previousText);
   const fresh = describeLines(issue);
   const fm = serializeFrontMatter(
-    { url: previous.meta.url, updated: issue.updated },
+    Object.assign({}, previous.meta, { updated: issue.updated }),
     fresh.concat(keptLines(previous.extraLines, fresh)));
-  return fm + content(issue, previousText);
+  const own = previous.meta.keepSummary && previous.body.match(/^#[ \t]+(.+?)[ \t]*$/m);
+  return fm + content(issue, previousText, own ? own[1] : '');
 }
 
-module.exports = { issueDocument, pulledDocument };
+// A file published from outside the download folder, saved there as the issue's file: its own
+// Markdown rather than Jira's rendering of it. previousText is the issue's file already there.
+function publishedDocument(issue, markdown, previousText) {
+  const fresh = describeLines(issue);
+  const kept = previousText ? keptLines(parseFrontMatter(previousText).extraLines, fresh) : [];
+  const fm = serializeFrontMatter({ url: issueWebUrl(issue.site, issue.key), updated: issue.updated }, fresh.concat(kept));
+  return fm + withTitle(issue.summary, String(markdown).trim() ? String(markdown).replace(/^\s+/, '') : '');
+}
+
+module.exports = { issueDocument, pulledDocument, publishedDocument };
