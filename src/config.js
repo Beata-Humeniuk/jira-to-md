@@ -43,6 +43,16 @@ function packageRootUri(resource) {
   return base ? vscode.Uri.joinPath(base, ...target.segments) : null;
 }
 
+const PARTS = ['summary', 'description', 'comments', 'attachments'];
+
+// The parts of an issue Publish sends and Pull brings back (jiraToMd.sync); a part left out is on.
+function syncParts(resource) {
+  const value = settings(resource).get('sync') || {};
+  const parts = {};
+  for (const part of PARTS) parts[part] = value[part] !== false;
+  return parts;
+}
+
 function askSubfolder() {
   return settings(settingsResource(activeDocument())).get('askSubfolder') === true;
 }
@@ -61,4 +71,4 @@ function descriptionFormat() {
   return value === 'wiki' || value === 'auto' ? value : 'html';
 }
 
-module.exports = { downloadFolderUri, packageRootUri, askSubfolder, configuredToken, configuredEmail, descriptionFormat };
+module.exports = { downloadFolderUri, packageRootUri, syncParts, askSubfolder, configuredToken, configuredEmail, descriptionFormat };

@@ -4,8 +4,10 @@ const { publishIssueCommand } = require('./publishCommand');
 const { pullIssueCommand } = require('./pullCommand');
 const { handlePreviewUri } = require('./previewActions');
 const { previewButtons } = require('./previewButton');
+const { initMermaidRenderer } = require('./mermaidRenderer');
 
 function activate(context) {
+  initMermaidRenderer(context);
   context.subscriptions.push(
     vscode.commands.registerCommand('jiraToMd.fetchIssue', fetchIssueCommand),
     vscode.commands.registerCommand('jiraToMd.publishIssue', publishIssueCommand),

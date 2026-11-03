@@ -4,6 +4,8 @@ const { parseFrontMatter } = require('./frontMatter');
 const { parseJiraUrl } = require('./jiraClient');
 const { contextAndIssue } = require('./issues');
 const { pulledDocument } = require('./issueDocument');
+const { syncParts } = require('./config');
+const { issueExtras } = require('./localAttachments');
 const { credentialsFor } = require('./credentials');
 const { errorMessage } = require('./messages');
 
@@ -44,7 +46,13 @@ async function pullDocument(document) {
   }
   if (!await confirmPull(document, meta.updated, issue.updated)) return;
 
-  await writeDocument(document, pulledDocument(issue, document.getText()));
+  const text = document.getText();
+  const parts = syncParts(document.uri);
+  // A binding made by 1.5.0 with the issue's summary kept never takes the summary.
+  if (meta.keepSummary) parts.summary = false;
+  const extras = await withNotification('Downloading ' + issue.key + ' from Jira…',
+    () => issueExtras(creds, issue, document.uri, parseFrontMatter(text).body, parts));
+  await writeDocument(document, pulledDocument(issue, text, Object.assign({ parts }, extras)));
   vscode.window.showInformationMessage('Pulled ' + issue.key + ' "' + issue.summary + '".');
 }
 

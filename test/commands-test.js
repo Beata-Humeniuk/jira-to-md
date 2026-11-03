@@ -5,6 +5,8 @@ const info = [];
 const errors = [];
 const warnings = [];
 const answers = {};
+const drawnSources = [];
+const panels = { opened: 0, disposed: 0 };
 let settings = {};
 let folderSettings = {};
 let routes = [];
@@ -50,7 +52,30 @@ const vscodeStub = {
   WorkspaceEdit,
   ProgressLocation: { Notification: 15 },
   FileType: { File: 1, Directory: 2 },
+  ViewColumn: { Beside: -2 },
   window: {
+    // Draws a diagram as the bytes "PNG:<source>"; a source containing "broken" fails like a Mermaid syntax error.
+    createWebviewPanel: () => {
+      let listener = null;
+      let disposed = null;
+      const panel = {
+        webview: {
+          cspSource: 'vscode-resource:',
+          asWebviewUri: (u) => u.path,
+          onDidReceiveMessage: (cb) => { listener = cb; },
+          postMessage: async ({ id, source }) => {
+            drawnSources.push(source);
+            setTimeout(() => listener(source.includes('broken') ? { id, error: 'Parse error on line 2:' }
+              : { id, png: Buffer.from('PNG:' + source).toString('base64') }));
+          },
+          set html(value) { panel.html = value; setTimeout(() => listener({ ready: true })); }
+        },
+        onDidDispose: (cb) => { disposed = cb; },
+        dispose: () => { panels.disposed++; if (disposed) disposed(); }
+      };
+      panels.opened++;
+      return panel;
+    },
     activeTextEditor: null,
     showInformationMessage: (message) => { info.push(message); },
     showErrorMessage: (message) => { errors.push(message); },
@@ -124,8 +149,10 @@ global.fetch = async (url, options) => {
     : raw ? JSON.parse(raw) : null;
   sent.push({ method, url: decodeURIComponent(url), body, headers: (options && options.headers) || {} });
   const route = routes.find((r) => (r.method || 'GET') === method && decodeURIComponent(url).indexOf(r.match) >= 0);
-  const status = route ? (route.status || 200) : 404;
-  const reply = route && (typeof route.body === 'function' ? route.body(body) : route.body);
+  // An issue without its own comment route has none.
+  const noComments = !route && method === 'GET' && /\/comment\?/.test(url);
+  const status = route || noComments ? ((route && route.status) || 200) : 404;
+  const reply = noComments ? { comments: [], total: 0 } : route && (typeof route.body === 'function' ? route.body(body) : route.body);
   return {
     ok: status < 300, status, url, json: async () => reply || {},
     arrayBuffer: async () => new TextEncoder().encode(String(reply)).buffer
@@ -135,6 +162,7 @@ global.fetch = async (url, options) => {
 const { fetchIssueCommand } = require('../src/fetchCommand');
 const { pullIssueCommand } = require('../src/pullCommand');
 const { publishIssueCommand } = require('../src/publishCommand');
+const parseFrontMatterOf = (text) => require('../src/frontMatter').parseFrontMatter(text).body;
 const { handlePreviewUri } = require('../src/previewActions');
 
 function reset() {
@@ -481,6 +509,8 @@ async function main() {
 
   reset();
   disk.set(LINKED_FILE, LINKED);
+  disk.set('/w/jira/PROJ-8_Package_change/conf/config.ts', 'export const a = 1;');
+  disk.set('/w/jira/PROJ-8_Package_change/conf/old.ts', 'old');
   const linkedIssue = issue('PROJ-8', { summary: 'Package change', description: linkedHtml, attachment: [CONFIG, OLD],
     updated: '2026-10-28T09:00:00.000+0000' });
   routes = [{ match: '/rest/api/2/issue/PROJ-8?', body: linkedIssue }];
@@ -504,28 +534,32 @@ async function main() {
     { method: 'PUT', match: '/rest/api/2/issue/PROJ-2', status: 204 }
   ];
   answers.input = SITE + '/browse/PROJ-2';
+  const ONLY_DESCRIPTION = { downloadFolder: 'jira', descriptionFormat: 'wiki', sync: { summary: false } };
+  settings = ONLY_DESCRIPTION;
   await publishIssueCommand(uri(GUIDE));
-  assert(warnings.length === 1 && warnings[0].includes('PROJ-2 "Add two-factor login"') && warnings[0].includes('description is empty'),
-    'publishing an unbound file to an issue link asks first, got: ' + warnings.join(' | '));
+  assert(warnings.length === 1 && warnings[0].includes('PROJ-2 "Add two-factor login"') && warnings[0].includes('description is empty') &&
+    warnings[0].includes('Its summary stays.'), 'publishing an unbound file to an issue link asks once, got: ' + warnings.join(' | '));
   assert(!sent.some((r) => r.method === 'PUT') && disk.get(GUIDE) === GUIDE_TEXT, 'declining changes nothing');
-  answers.warning = 'Replace the description';
+  answers.warning = 'Publish';
   const replaced = await publishIssueCommand(uri(GUIDE));
   const replacePut = sent.find((r) => r.method === 'PUT');
   assert(!errors.length && replaced && replaced.key === 'PROJ-2' && replaced.action === 'updated',
     'the existing issue is updated, got: ' + errors.join(' | '));
-  assert(Object.keys(replacePut.body.fields).join() === 'description' && replacePut.body.fields.description.includes('Use [the config|'),
-    'only the description is replaced, got: ' + JSON.stringify(replacePut.body));
+  assert(Object.keys(replacePut.body.fields).join() === 'description' &&
+    replacePut.body.fields.description.startsWith('h1. Login guide\n\nUse [the config|'),
+  'only the description is replaced, and it keeps the file\'s heading, got: ' + JSON.stringify(replacePut.body));
   let guide = disk.get(GUIDE);
-  assert(guide.startsWith('---\njira:\n  url: ' + SITE + '/browse/PROJ-2\n  updated: 2026-10-29T09:00:00.000+0000\n  keepSummary: true\n' +
+  assert(guide.startsWith('---\njira:\n  url: ' + SITE + '/browse/PROJ-2\n  updated: 2026-10-29T09:00:00.000+0000\n' +
     'confluence:\n  url: https://acme.atlassian.net/wiki/spaces/DOC/pages/77\n  version: 4\ntype: confluence-page\n---\n\n# Login guide\n'),
   'the file is bound to the issue next to its Confluence binding, got:\n' + guide);
   const refreshed = disk.get(DOWNLOADED);
   assert(refreshed.includes('updated: 2026-10-29T09:00:00.000+0000') && refreshed.includes('owner: team-auth') &&
-    !refreshed.includes('confluence:') && refreshed.includes('# Add two-factor login\n\nUse [the config](../../docs/guide/conf/login.ts).'),
+    !refreshed.includes('confluence:') && refreshed.includes('# Add two-factor login\n\n# Login guide\n\nUse [the config](../../docs/guide/conf/login.ts).'),
   'the downloaded issue file gets the content, with links to the same files, got:\n' + refreshed);
   assert(Array.from(disk.keys()).filter((k) => k.startsWith('/w/jira/')).length === 1, 'no second file is made in the package');
 
   reset();
+  settings = ONLY_DESCRIPTION;
   disk.set(GUIDE, guide.replace('Use [the config]', 'Now use [the config]'));
   routes = [
     { match: '/rest/api/2/issue/PROJ-2?fields=updated', body: { fields: { updated: '2026-10-29T10:00:00.000+0000' } } },
@@ -535,10 +569,38 @@ async function main() {
   await publishIssueCommand(uri(GUIDE));
   const again = sent.find((r) => r.method === 'PUT');
   assert(!errors.length && !warnings.length && Object.keys(again.body.fields).join() === 'description',
-    'a bound file keeps the issue summary on later publishes, without asking, got: ' + JSON.stringify(again && again.body));
-  assert(disk.get(GUIDE).includes('  keepSummary: true\n') && disk.get(GUIDE).includes('  version: 4\n'), 'both bindings stay');
+    'with the summary unchecked a bound file keeps the issue summary, without asking, got: ' + JSON.stringify(again && again.body));
+  assert(again.body.fields.description.startsWith('h1. Login guide\n\nNow use'), 'the heading leads the description');
+  assert(disk.get(GUIDE).includes('  version: 4\n') && !disk.get(GUIDE).includes('keepSummary'), 'both bindings stay, with no flag');
 
   reset();
+  settings = { downloadFolder: 'jira', descriptionFormat: 'wiki', sync: { description: false, comments: false, attachments: false } };
+  disk.set(GUIDE, guide);
+  routes = [
+    { match: '/rest/api/2/issue/PROJ-2?fields=updated', body: { fields: { updated: '2026-10-29T10:00:00.000+0000' } } },
+    { match: '/rest/api/2/issue/PROJ-2?', body: issue('PROJ-2', Object.assign({}, STORY.fields, { updated: '2026-10-29T09:00:00.000+0000' })) },
+    { method: 'PUT', match: '/rest/api/2/issue/PROJ-2', status: 204 }
+  ];
+  await publishIssueCommand(uri(GUIDE));
+  const summaryPut = sent.find((r) => r.method === 'PUT');
+  assert(!errors.length && JSON.stringify(summaryPut.body) === '{"fields":{"summary":"Login guide"}}' &&
+    info.some((m) => m.includes('Sent: summary (jiraToMd.sync).')),
+  'with only the summary checked only the heading is sent, got: ' + JSON.stringify(summaryPut && summaryPut.body) + info.join(' | '));
+  assert(disk.get(DOWNLOADED) === undefined, 'nothing is copied, as the description in Jira is not the file\'s');
+
+  reset();
+  disk.set(GUIDE, guide.replace('  updated: 2026-10-29T09:00:00.000+0000\n', '  updated: 2026-10-29T09:00:00.000+0000\n  keepSummary: true\n'));
+  routes = [
+    { match: '/rest/api/2/issue/PROJ-2?fields=updated', body: { fields: { updated: '2026-10-29T10:00:00.000+0000' } } },
+    { match: '/rest/api/2/issue/PROJ-2?', body: issue('PROJ-2', Object.assign({}, STORY.fields, { updated: '2026-10-29T09:00:00.000+0000' })) },
+    { method: 'PUT', match: '/rest/api/2/issue/PROJ-2', status: 204 }
+  ];
+  await publishIssueCommand(uri(GUIDE));
+  assert(Object.keys(sent.find((r) => r.method === 'PUT').body.fields).join() === 'description',
+    'a file bound with keepSummary by 1.5.0 still sends only the description');
+
+  reset();
+  settings = ONLY_DESCRIPTION;
   disk.set(GUIDE, guide);
   routes = [{ match: '/rest/api/2/issue/PROJ-2?', body: issue('PROJ-2', Object.assign({}, STORY.fields, {
     updated: '2026-10-30T09:00:00.000+0000', description: 'Edited *in Jira*.' })) }];
@@ -547,6 +609,17 @@ async function main() {
   guide = disk.get(GUIDE);
   assert(!errors.length && guide.includes('# Login guide\n\nEdited **in Jira**.') && guide.includes('confluence:\n  url:'),
     'a pull keeps the file\'s own title and its Confluence binding, got:\n' + guide);
+
+  reset();
+  settings = ONLY_DESCRIPTION;
+  disk.set(GUIDE, guide);
+  routes = [{ match: '/rest/api/2/issue/PROJ-2?', body: issue('PROJ-2', Object.assign({}, STORY.fields, {
+    updated: '2026-10-31T09:00:00.000+0000', description: 'h1. Login guide\n\nEdited again.' })) }];
+  answers.warning = 'Pull';
+  await pullIssueCommand(uri(GUIDE));
+  const repulled = parseFrontMatterOf(disk.get(GUIDE));
+  assert(!errors.length && repulled === '\n# Login guide\n\nEdited again.\n',
+    'a description that starts with the file\'s heading is not given a second one, got:\n' + repulled);
 
   reset();
   disk.set(NEW, '# Add an audit log\n\nBody.\n');
@@ -558,14 +631,14 @@ async function main() {
   answers.input = SITE + '/browse/PROJ-1';
   let epicChoices = [];
   answers.pick = (items) => { epicChoices = items; return items[1]; };
-  answers.warning = 'Replace the description and the summary';
+  answers.warning = 'Publish';
   await publishIssueCommand(uri(NEW));
   const epicPut = sent.find((r) => r.method === 'PUT');
   assert(epicChoices.length === 2 && epicChoices[0].label.includes('Create a new issue in epic PROJ-1') &&
     epicChoices[1].label.includes('Replace the description of epic PROJ-1'), 'an epic link offers both, got: ' + JSON.stringify(epicChoices));
   assert(!errors.length && epicPut && epicPut.body.fields.summary === 'Add an audit log' && !sent.some((r) => r.method === 'POST'),
     'the epic\'s summary and description are replaced, got: ' + errors.join(' | '));
-  assert(!disk.get(NEW).includes('keepSummary'), 'replacing the summary too needs no flag');
+  assert(warnings[0].includes('Its summary becomes "Add an audit log".'), 'by default the summary is replaced too, got: ' + warnings[0]);
   assert(disk.has('/w/jira/PROJ-1_Add_an_audit_log/PROJ-1_Add_an_audit_log.md'), 'the epic gets its package, got: ' + Array.from(disk.keys()).join(', '));
 
   reset();
@@ -577,14 +650,175 @@ async function main() {
     { method: 'PUT', match: '/rest/api/2/issue/PROJ-2', status: 204 }
   ];
   answers.input = SITE + '/browse/PROJ-2';
-  answers.warning = 'Replace the description';
+  answers.warning = 'Publish';
   await publishIssueCommand(uri(NEW));
   assert(!errors.length && warnings[0].includes('current description is replaced') && disk.size === 1,
     'without a download folder nothing is copied, got: ' + Array.from(disk.keys()).join(', '));
 
+  reset();
+  const DRAWN_NAME = require('../src/mermaidImages').diagramName('graph TD\n  A --> B');
+  const SYNCED = '/w/jira/PROJ-2_Add_two-factor_login.md';
+  disk.set(SYNCED, LOCAL + '\n## Comments <!-- jira-comments -->\n\n### Mine, not sent\n\nPlease check *this*.\n');
+  const SHOT = { id: '50', filename: 'shot.png', size: 4, created: '2026-10-01T10:00:00.000+0000', content: SITE + '/secure/attachment/50/shot.png' };
+  const SPEC = { id: '51', filename: 'spec v2.pdf', size: 3, created: '2026-10-01T10:00:00.000+0000', content: SITE + '/secure/attachment/51/spec v2.pdf' };
+  const OLD_SHOT = { id: '49', filename: 'shot.png', size: 9, created: '2026-09-01T10:00:00.000+0000', content: SITE + '/secure/attachment/49/shot.png' };
+  const DRAWN = { id: '52', filename: DRAWN_NAME, size: 5, content: SITE + '/secure/attachment/52/' + DRAWN_NAME };
+  const COMMENTS = [
+    { id: 101, author: { displayName: 'Anna Nowak' }, created: '2026-10-02T09:15:00.000+0000', body: 'h2. Review\nLooks *good*, see !shot.png!' },
+    { id: 102, author: { displayName: 'Jan Kowalski' }, created: '2026-10-03T11:00:00.000+0000', body: 'Done.' }
+  ];
+  routes = [
+    { match: '/rest/api/2/issue/PROJ-2/comment?', body: { comments: COMMENTS, total: 2 } },
+    { match: '/secure/attachment/50/shot.png', body: 'PNG1' },
+    { match: '/secure/attachment/51/spec v2.pdf', body: 'PDF' },
+    { match: '/rest/api/2/issue/PROJ-2?', body: issue('PROJ-2', Object.assign({}, STORY.fields, {
+      updated: '2026-10-03T11:00:00.000+0000', description: 'Before: !shot.png!', attachment: [OLD_SHOT, SHOT, SPEC, DRAWN] })) }
+  ];
+  answers.warning = 'Pull';
+  await pullIssueCommand(uri(SYNCED));
+  const synced = disk.get(SYNCED);
+  assert(!errors.length, 'pulling comments and files works, got: ' + errors.join(' | '));
+  assert(synced.includes('# Add two-factor login\n\nBefore: ![shot.png](./attachments/PROJ-2/shot.png)\n'),
+    'an attachment shown in the description is downloaded and shown from disk, got:\n' + synced);
+  assert(disk.get('/w/jira/attachments/PROJ-2/shot.png') === 'PNG1' && disk.get('/w/jira/attachments/PROJ-2/spec v2.pdf') === 'PDF' &&
+    !disk.has('/w/jira/attachments/PROJ-2/' + DRAWN_NAME), 'the newest file of each name is downloaded, drawn diagrams are not');
+  assert(synced.includes('## Comments <!-- jira-comments -->\n\n' +
+    '### Anna Nowak, 2026-10-02 09:15 <!-- jira-comment 101 -->\n\n##### Review\n\nLooks **good**, see ![shot.png](./attachments/PROJ-2/shot.png)\n\n' +
+    '### Jan Kowalski, 2026-10-03 11:00 <!-- jira-comment 102 -->\n\nDone.\n\n' +
+    '### Mine, not sent\n\nPlease check *this*.\n\n'),
+  'comments come with authors and ids, headings below the comment\'s, and an unsent one is kept, got:\n' + synced);
+  assert(synced.endsWith('## Attachments <!-- jira-attachments -->\n\n- [shot.png](./attachments/PROJ-2/shot.png)\n' +
+    '- [spec v2.pdf](./attachments/PROJ-2/spec%20v2.pdf)\n'), 'every file is listed at the end, got:\n' + synced);
+
+  reset();
+  disk.set(SYNCED, synced.replace('Done.', 'Done, edited.'));
+  disk.set('/w/jira/attachments/PROJ-2/shot.png', 'PNG1');
+  disk.set('/w/jira/attachments/PROJ-2/spec v2.pdf', 'PDF');
+  disk.set('/w/jira/notes.txt', 'new file');
+  disk.set(SYNCED, disk.get(SYNCED).replace('- [shot.png]', '- [notes.txt](./notes.txt)\n- [shot.png]'));
+  routes = [
+    { match: '/rest/api/2/issue/PROJ-2/comment?', body: { comments: COMMENTS, total: 2 } },
+    { method: 'POST', match: '/rest/api/2/issue/PROJ-2/comment', body: { id: 900, author: { displayName: 'Beata' }, created: '2026-11-03T12:00:00.000+0000' } },
+    { method: 'PUT', match: '/rest/api/2/issue/PROJ-2/comment/102', status: 403 },
+    { match: '/rest/api/2/issue/PROJ-2?fields=updated', body: { fields: { updated: '2026-11-03T12:01:00.000+0000' } } },
+    { match: '/rest/api/2/issue/PROJ-2?fields=attachment', body: { fields: { attachment: [SHOT, SPEC] } } },
+    { match: '/secure/attachment/50/shot.png', body: 'PNG1' },
+    { match: '/secure/attachment/51/spec v2.pdf', body: 'PDF' },
+    { method: 'POST', match: '/rest/api/2/issue/PROJ-2/attachments', body: (files) => files.map((f) => ({
+      id: '60', filename: f.name, size: f.text.length, content: SITE + '/secure/attachment/60/' + f.name })) },
+    { match: '/rest/api/2/issue/PROJ-2?', body: issue('PROJ-2', Object.assign({}, STORY.fields, {
+      updated: '2026-10-03T11:00:00.000+0000', attachment: [SHOT, SPEC] })) },
+    { method: 'PUT', match: '/rest/api/2/issue/PROJ-2', status: 204 }
+  ];
+  await publishIssueCommand(uri(SYNCED));
+  const issuePut = sent.find((r) => r.method === 'PUT' && r.url.endsWith('/issue/PROJ-2'));
+  const commentPost = sent.find((r) => r.method === 'POST' && r.url.endsWith('/comment'));
+  const fileUploads = sent.filter((r) => r.method === 'POST' && r.url.endsWith('/attachments'));
+  assert(!errors.length && issuePut && issuePut.body.fields.description === 'Before: !shot.png!' && !issuePut.body.fields.description.includes('Comments'),
+    'the description goes without the sections, with the attachment shown again, got: ' + errors.join(' | ') + JSON.stringify(issuePut && issuePut.body));
+  assert(commentPost && commentPost.body.body === 'Please check _this_.', 'the new comment is added, got: ' + JSON.stringify(commentPost && commentPost.body));
+  assert(sent.some((r) => r.method === 'PUT' && r.url.endsWith('/comment/102')) && !sent.some((r) => r.url.endsWith('/comment/101')),
+    'only the changed comment is updated');
+  assert(fileUploads.length === 1 && fileUploads[0].body[0].name === 'notes.txt', 'only the new listed file is uploaded, got: ' + JSON.stringify(fileUploads.map((u) => u.body)));
+  assert(info.some((m) => m.includes('Added 1 comment.') && m.includes('Jira refused to change 1 comment (only their authors can): Jan Kowalski, 2026-10-03 11:00.')),
+    'the comments are reported, got: ' + info.join(' | '));
+  assert(disk.get(SYNCED).includes('### Beata, 2026-11-03 12:00 <!-- jira-comment 900 -->\n\nPlease check *this*.') &&
+    !disk.get(SYNCED).includes('Mine, not sent') && disk.get(SYNCED).includes('updated: 2026-11-03T12:01:00.000+0000'),
+  'the new comment gets its id in the file, got:\n' + disk.get(SYNCED));
+
+  reset();
+  settings = { downloadFolder: 'jira', descriptionFormat: 'wiki', sync: { comments: false, attachments: false } };
+  routes = [{ match: '/rest/api/2/issue/PROJ-2?', body: issue('PROJ-2', Object.assign({}, STORY.fields, { attachment: [SHOT] })) }];
+  answers.input = SITE + '/browse/PROJ-2';
+  await fetchIssueCommand();
+  assert(!errors.length && !sent.some((r) => /comment|attachment\//.test(r.url)) &&
+    !disk.get(STORY_PKG_FILE).includes('jira-comments') && !disk.get(STORY_PKG_FILE).includes('jira-attachments'),
+  'with comments and files unchecked a download fetches neither, got: ' + sent.map((r) => r.url).join(', '));
+
+  reset();
+  settings = { sync: { summary: false, description: false, comments: false, attachments: false } };
+  disk.set(FILE, LOCAL);
+  await publishIssueCommand(uri(FILE));
+  assert(!sent.length && warnings.some((m) => m.includes('Nothing to publish')), 'with every part unchecked nothing is sent');
+
   const { rebaseLinks } = require('../src/attachments');
   assert(rebaseLinks('[a](./x/a.ts#L1) ![i](img.png "t") [w](https://x.y/a) [h](#top)', '/w/docs', '/w/jira/P') ===
     '[a](../../docs/x/a.ts#L1) ![i](../../docs/img.png "t") [w](https://x.y/a) [h](#top)', 'relative links follow a copied file');
+
+  require('../src/mermaidRenderer').initMermaidRenderer({ extensionUri: uri('/ext') });
+  const { diagramName, diagramsIn, withDiagramImages, restoreDiagrams } = require('../src/mermaidImages');
+  const FLOW = 'graph TD\n  A --> B';
+  const SEQ = 'sequenceDiagram\n  A->>B: hi';
+  const FLOW_NAME = diagramName(FLOW);
+  assert(/^mermaid-[0-9a-f]{12}\.png$/.test(FLOW_NAME) && diagramName(FLOW + '\r\n\n') === FLOW_NAME && diagramName(SEQ) !== FLOW_NAME,
+    'a diagram is named after its source, got: ' + FLOW_NAME);
+  const twice = '```mermaid\n' + FLOW + '\n```\n\n> ```mermaid\n> ' + FLOW.replace('\n', '\n> ') + '\n> ```\n\n```js\nx\n```\n';
+  assert(diagramsIn(twice).length === 1, 'a diagram used twice is drawn once');
+  assert(withDiagramImages(twice, new Set([FLOW_NAME])) === '![Mermaid diagram](' + FLOW_NAME + ')\n\n> ![Mermaid diagram](' + FLOW_NAME + ')\n\n```js\nx\n```\n',
+    'mermaid blocks become images, also in a quote, got:\n' + withDiagramImages(twice, new Set([FLOW_NAME])));
+  const ATT = { filename: FLOW_NAME, content: SITE + '/secure/attachment/30/' + FLOW_NAME };
+  const previous = 'Intro\n\n```mermaid\n' + FLOW + '\n```\n';
+  assert(restoreDiagrams('Intro\n\n![Mermaid diagram](' + ATT.content + ')\n', [ATT], previous) === 'Intro\n\n```mermaid\n' + FLOW + '\n```\n' &&
+    restoreDiagrams('!' + FLOW_NAME + '|thumbnail!', [ATT], previous) === '```mermaid\n' + FLOW + '\n```',
+  'downloaded diagram images become the blocks of the previous file again');
+  assert(restoreDiagrams('![Mermaid diagram](' + ATT.content + ')', [ATT], 'no diagrams') === '![Mermaid diagram](' + ATT.content + ')',
+    'without the source the image stays');
+
+  reset();
+  settings = {};
+  const DIAGRAM_FILE = '/w/jira/PROJ-8_Package_change/PROJ-8_Package_change.md';
+  const DIAGRAMS = '---\njira:\n  url: ' + SITE + '/browse/PROJ-8\n  updated: 2026-09-01T10:00:00.000+0000\n---\n\n' +
+    '# Package change\n\nFlow:\n\n```mermaid\n' + FLOW + '\n```\n\n```mermaid\n' + SEQ + '\n```\n\n```mermaid\ngraph TD\n  A -- broken\n```\n';
+  disk.set(DIAGRAM_FILE, DIAGRAMS);
+  let attachmentId = 40;
+  routes = [
+    { match: '/rest/api/2/issue/PROJ-8?fields=updated', body: { fields: { updated: '2026-11-03T09:00:00.000+0000' } } },
+    { match: '/rest/api/2/issue/PROJ-8?fields=attachment', body: { fields: { attachment: [ATT] } } },
+    { match: '/rest/api/2/issue/PROJ-8?', body: RICH },
+    { method: 'POST', match: '/rest/api/2/issue/PROJ-8/attachments', body: (files) => files.map((f) => ({
+      id: String(attachmentId), filename: f.name, size: f.text.length, content: SITE + '/secure/attachment/' + (attachmentId++) + '/' + f.name })) },
+    { method: 'PUT', match: '/rest/api/2/issue/PROJ-8', status: 204 }
+  ];
+  drawnSources.length = 0;
+  await publishIssueCommand(uri(DIAGRAM_FILE));
+  const diagramUploads = sent.filter((r) => r.method === 'POST');
+  const diagramHtml = (sent.find((r) => r.method === 'PUT') || { body: { fields: {} } }).body.fields.description || '';
+  assert(!errors.length && drawnSources.length === 2 && drawnSources[0] === SEQ && drawnSources[1].includes('broken'),
+    'only diagrams without an attachment are drawn, got: ' + errors.join(' | ') + JSON.stringify(drawnSources));
+  assert(panels.opened === 1 && panels.disposed === 1, 'one drawing window is opened and closed');
+  assert(diagramUploads.length === 1 && diagramUploads[0].body[0].name === diagramName(SEQ) && diagramUploads[0].body[0].text === 'PNG:' + SEQ,
+    'the new diagram is attached as PNG, got: ' + JSON.stringify(diagramUploads.map((u) => u.body)));
+  assert(diagramHtml.includes('<img src="' + ATT.content + '" alt="Mermaid diagram">') &&
+    diagramHtml.includes('<img src="' + SITE + '/secure/attachment/40/' + diagramName(SEQ) + '" alt="Mermaid diagram">') &&
+    diagramHtml.includes('<code class="language-mermaid">graph TD\n  A -- broken'),
+  'drawn diagrams are images in the description, the broken one stays code, got: ' + diagramHtml);
+  assert(info.some((m) => m.includes('Drew 1 diagram.') && m.includes('A diagram could not be drawn and went as code: Parse error on line 2:')),
+    'drawing is reported, got: ' + info.join(' | '));
+  assert(disk.get(DIAGRAM_FILE).includes('```mermaid\n' + SEQ), 'the file keeps its mermaid blocks');
+
+  reset();
+  settings = { descriptionFormat: 'wiki' };
+  disk.set(DIAGRAM_FILE, DIAGRAMS.replace(/\n\n```mermaid\n(sequenceDiagram|graph TD\n  A -- broken)[\s\S]*?```/g, ''));
+  routes = [
+    { match: '/rest/api/2/issue/PROJ-8?fields=updated', body: { fields: { updated: '2026-11-03T09:00:00.000+0000' } } },
+    { match: '/rest/api/2/issue/PROJ-8?fields=attachment', body: { fields: { attachment: [ATT] } } },
+    { match: '/rest/api/2/issue/PROJ-8?', body: RICH },
+    { method: 'PUT', match: '/rest/api/2/issue/PROJ-8', status: 204 }
+  ];
+  panels.opened = 0;
+  await publishIssueCommand(uri(DIAGRAM_FILE));
+  const wikiPut = sent.find((r) => r.method === 'PUT');
+  assert(!errors.length && panels.opened === 0 && wikiPut.body.fields.description === 'Flow:\n\n!' + FLOW_NAME + '!',
+    'an unchanged diagram reuses its attachment without drawing, in wiki markup too, got: ' + errors.join(' | ') + JSON.stringify(wikiPut && wikiPut.body));
+
+  reset();
+  disk.set(DIAGRAM_FILE, DIAGRAMS);
+  routes = [{ match: '/rest/api/2/issue/PROJ-8?', body: issue('PROJ-8', { summary: 'Package change', attachment: [ATT],
+    description: '<p>Flow, edited:</p>\n<p><img src="' + ATT.content + '" alt="Mermaid diagram"></p>', updated: '2026-11-03T10:00:00.000+0000' }) }];
+  answers.warning = 'Pull';
+  await pullIssueCommand(uri(DIAGRAM_FILE));
+  assert(!errors.length && disk.get(DIAGRAM_FILE).includes('Flow, edited:\n\n```mermaid\n' + FLOW + '\n```'),
+    'a pull brings the mermaid block back in place of its image, got:\n' + disk.get(DIAGRAM_FILE));
 
   const { relinkLocalFiles } = require('../src/attachments');
   assert(relinkLocalFiles('[cfg|^config.ts] and [^old.ts] and [x|^other.ts]', [], '[a](./conf/config.ts) [b](./conf/old.ts)') ===
