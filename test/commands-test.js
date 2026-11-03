@@ -160,6 +160,7 @@ global.fetch = async (url, options) => {
 const { fetchIssueCommand } = require('../src/fetchCommand');
 const { pullIssueCommand } = require('../src/pullCommand');
 const { publishIssueCommand } = require('../src/publishCommand');
+const parseFrontMatterOf = (text) => require('../src/frontMatter').parseFrontMatter(text).body;
 const { handlePreviewUri } = require('../src/previewActions');
 
 function reset() {
@@ -538,15 +539,16 @@ async function main() {
   const replacePut = sent.find((r) => r.method === 'PUT');
   assert(!errors.length && replaced && replaced.key === 'PROJ-2' && replaced.action === 'updated',
     'the existing issue is updated, got: ' + errors.join(' | '));
-  assert(Object.keys(replacePut.body.fields).join() === 'description' && replacePut.body.fields.description.includes('Use [the config|'),
-    'only the description is replaced, got: ' + JSON.stringify(replacePut.body));
+  assert(Object.keys(replacePut.body.fields).join() === 'description' &&
+    replacePut.body.fields.description.startsWith('h1. Login guide\n\nUse [the config|'),
+  'only the description is replaced, and it keeps the file\'s heading, got: ' + JSON.stringify(replacePut.body));
   let guide = disk.get(GUIDE);
   assert(guide.startsWith('---\njira:\n  url: ' + SITE + '/browse/PROJ-2\n  updated: 2026-10-29T09:00:00.000+0000\n  keepSummary: true\n' +
     'confluence:\n  url: https://acme.atlassian.net/wiki/spaces/DOC/pages/77\n  version: 4\ntype: confluence-page\n---\n\n# Login guide\n'),
   'the file is bound to the issue next to its Confluence binding, got:\n' + guide);
   const refreshed = disk.get(DOWNLOADED);
   assert(refreshed.includes('updated: 2026-10-29T09:00:00.000+0000') && refreshed.includes('owner: team-auth') &&
-    !refreshed.includes('confluence:') && refreshed.includes('# Add two-factor login\n\nUse [the config](../../docs/guide/conf/login.ts).'),
+    !refreshed.includes('confluence:') && refreshed.includes('# Add two-factor login\n\n# Login guide\n\nUse [the config](../../docs/guide/conf/login.ts).'),
   'the downloaded issue file gets the content, with links to the same files, got:\n' + refreshed);
   assert(Array.from(disk.keys()).filter((k) => k.startsWith('/w/jira/')).length === 1, 'no second file is made in the package');
 
@@ -572,6 +574,16 @@ async function main() {
   guide = disk.get(GUIDE);
   assert(!errors.length && guide.includes('# Login guide\n\nEdited **in Jira**.') && guide.includes('confluence:\n  url:'),
     'a pull keeps the file\'s own title and its Confluence binding, got:\n' + guide);
+
+  reset();
+  disk.set(GUIDE, guide);
+  routes = [{ match: '/rest/api/2/issue/PROJ-2?', body: issue('PROJ-2', Object.assign({}, STORY.fields, {
+    updated: '2026-10-31T09:00:00.000+0000', description: 'h1. Login guide\n\nEdited again.' })) }];
+  answers.warning = 'Pull';
+  await pullIssueCommand(uri(GUIDE));
+  const repulled = parseFrontMatterOf(disk.get(GUIDE));
+  assert(!errors.length && repulled === '\n# Login guide\n\nEdited again.\n',
+    'a description that starts with the file\'s heading is not given a second one, got:\n' + repulled);
 
   reset();
   disk.set(NEW, '# Add an audit log\n\nBody.\n');

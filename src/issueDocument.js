@@ -27,13 +27,16 @@ function withTitle(title, body) {
   return '\n# ' + title + '\n' + (body ? '\n' + body : '');
 }
 
-function content(issue, previousText, title) {
+// ownTitle: a file that keeps the issue's summary publishes its # heading in the description,
+// so a description starting with a heading needs no other.
+function content(issue, previousText, ownTitle) {
   const md = looksLikeHtml(issue.description) ? htmlToMd(issue.description) : wikiToMd(issue.description);
   const previousBody = previousText ? parseFrontMatter(previousText).body : '';
   const body = previousText
     ? relinkLocalFiles(restoreDiagrams(md, issue.attachments, previousBody), issue.attachments, previousBody)
     : md;
-  return withTitle(title || issue.summary, body);
+  if (ownTitle && /^#[ \t]+\S/.test(body)) return '\n' + body;
+  return withTitle(ownTitle || issue.summary, body);
 }
 
 function issueDocument(issue, previousText) {

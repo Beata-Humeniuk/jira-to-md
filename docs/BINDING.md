@@ -31,8 +31,9 @@ managed: true
 - `key`, `issueType`, `status`, and `epic` describe the issue at the last
   download. They are refreshed by Pull and not sent to Jira.
 - `keepSummary: true` is added when you published the file to an existing issue
-  and kept the issue's summary. Publish then sends only the description, and
-  Pull keeps the file's own `#` heading.
+  and kept the issue's summary. Publish then sends only the description, with
+  the file's `#` heading at its top, and Pull keeps that heading as the file's
+  own.
 - Keys you add yourself are kept by Pull.
 
 The first `#` heading is the issue summary. If there is none, the file name is

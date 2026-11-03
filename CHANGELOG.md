@@ -13,6 +13,12 @@ This file lists user-visible changes to Jira to Markdown. The project follows
   cannot draw goes as code, and the message says why. Pull turns the images
   back into the ` ```mermaid ` blocks.
 
+### Fixed
+
+- Publishing only the description of an existing issue (the issue keeps its
+  summary) no longer drops the file's `#` heading: it is the first line of the
+  description. Pull does not add the heading a second time.
+
 ## [1.5.0] - 2026-10-30
 
 ### Added

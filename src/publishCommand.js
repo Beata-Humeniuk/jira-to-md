@@ -204,7 +204,10 @@ function savedNote(uri) {
   return uri ? ' Saved to ' + vscode.workspace.asRelativePath(uri, false) + '.' : '';
 }
 
-async function publishUpdate(source, meta, title, content) {
+// body is the whole file below the front matter: with the issue's summary kept, the # heading is
+// not the summary, so it stays in the description.
+async function publishUpdate(source, meta, title, titled, body) {
+  const content = meta.keepSummary ? body.replace(/^\s+/, '') : titled;
   const parsed = parseJiraUrl(meta.url);
   if (!parsed || !parsed.issueKey) throw new Error('bad-url');
   const creds = await credentialsFor(parsed.site);
@@ -259,7 +262,7 @@ async function pickEpicAction(epic, title) {
 }
 
 // Binds the file to an issue that already exists, e.g. one created with an empty description.
-async function replaceExisting(source, target, title, content) {
+async function replaceExisting(source, target, title, content, body) {
   const empty = !target.description.trim();
   const buttons = title === target.summary ? [REPLACE_DESCRIPTION] : [REPLACE_DESCRIPTION, REPLACE_BOTH];
   const picked = await vscode.window.showWarningMessage(
@@ -271,10 +274,10 @@ async function replaceExisting(source, target, title, content) {
   if (!picked) return;
   const meta = { url: issueWebUrl(target.site, target.key), updated: target.updated };
   if (picked === REPLACE_DESCRIPTION && buttons.length > 1) meta.keepSummary = true;
-  return publishUpdate(source, meta, title, content);
+  return publishUpdate(source, meta, title, content, body);
 }
 
-async function publishNew(source, title, content) {
+async function publishNew(source, title, content, body) {
   const parsed = await askForTarget();
   if (!parsed) return;
   const creds = await credentialsFor(parsed.site);
@@ -282,11 +285,11 @@ async function publishNew(source, title, content) {
 
   const { ctx, issue: target } = await withNotification('Checking the issue in Jira…',
     () => contextAndIssue(creds, parsed.site, parsed.issueKey));
-  if (target && !target.isEpic) return replaceExisting(source, target, title, content);
+  if (target && !target.isEpic) return replaceExisting(source, target, title, content, body);
   if (target) {
     const action = await pickEpicAction(target, title);
     if (!action) return;
-    if (action === 'replace') return replaceExisting(source, target, title, content);
+    if (action === 'replace') return replaceExisting(source, target, title, content, body);
   }
   const epic = target;
 
@@ -338,8 +341,8 @@ async function publishIssueCommand(fileUri) {
     const { meta, body } = parseFrontMatter(source.text);
     const { title, content } = splitTitleAndBody(body, source.fileName.replace(/\.md$/i, '') || 'Untitled');
     return meta
-      ? await publishUpdate(source, meta, title, content)
-      : await publishNew(source, title, content);
+      ? await publishUpdate(source, meta, title, content, body)
+      : await publishNew(source, title, content, body);
   } catch (e) {
     if (fileUri) throw new Error(errorMessage(e));
     vscode.window.showErrorMessage(errorMessage(e));

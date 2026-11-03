@@ -77,7 +77,8 @@ unsaved edits.
 - **An unbound file** asks for a link:
   - **an issue** — the file replaces the issue's description, e.g. of an issue
     created with an empty one. You choose whether its summary stays or becomes
-    the file's `#` heading. A kept summary stays on later publishes too.
+    the file's `#` heading. When the summary stays, the heading goes into the
+    description as its first line. A kept summary stays on later publishes too.
   - **an epic** — choose between a new Story or Task in the epic and replacing
     the epic's description.
   - **a project** — a new Story or Task in the project. Without a `#` heading,
