@@ -62,13 +62,14 @@ function keptLines(previousLines, freshLines) {
 }
 
 // A file whose binding keeps its summary (its title is a Confluence page's, say) keeps its own heading.
-function pulledDocument(issue, previousText) {
+// keepOwnTitle: only the description is published (jiraToMd.publishFields), so the file's heading is its own.
+function pulledDocument(issue, previousText, keepOwnTitle) {
   const previous = parseFrontMatter(previousText);
   const fresh = describeLines(issue);
   const fm = serializeFrontMatter(
     Object.assign({}, previous.meta, { updated: issue.updated }),
     fresh.concat(keptLines(previous.extraLines, fresh)));
-  const own = previous.meta.keepSummary && previous.body.match(/^#[ \t]+(.+?)[ \t]*$/m);
+  const own = (keepOwnTitle || previous.meta.keepSummary) && previous.body.match(/^#[ \t]+(.+?)[ \t]*$/m);
   return fm + content(issue, previousText, own ? own[1] : '');
 }
 

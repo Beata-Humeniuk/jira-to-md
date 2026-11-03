@@ -30,14 +30,14 @@ managed: true
   to notice changes made there meanwhile.
 - `key`, `issueType`, `status`, and `epic` describe the issue at the last
   download. They are refreshed by Pull and not sent to Jira.
-- `keepSummary: true` is added when you published the file to an existing issue
-  and kept the issue's summary. Publish then sends only the description, with
-  the file's `#` heading at its top, and Pull keeps that heading as the file's
-  own.
+- `keepSummary: true`, written by version 1.5.0 when you kept an issue's
+  summary, makes Publish send only the description of this file, as
+  `jiraToMd.publishFields` set to `description` does for all files.
 - Keys you add yourself are kept by Pull.
 
 The first `#` heading is the issue summary. If there is none, the file name is
-used.
+used. With `jiraToMd.publishFields` set to `description`, the heading stays at
+the top of the description instead, and Pull keeps it as the file's own.
 
 A `confluence:` block of Confluence to Markdown can stand next to the `jira:`
 block; each extension reads and rewrites only its own.

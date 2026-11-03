@@ -530,11 +530,13 @@ async function main() {
     { method: 'PUT', match: '/rest/api/2/issue/PROJ-2', status: 204 }
   ];
   answers.input = SITE + '/browse/PROJ-2';
+  const ONLY_DESCRIPTION = { downloadFolder: 'jira', descriptionFormat: 'wiki', publishFields: 'description' };
+  settings = ONLY_DESCRIPTION;
   await publishIssueCommand(uri(GUIDE));
-  assert(warnings.length === 1 && warnings[0].includes('PROJ-2 "Add two-factor login"') && warnings[0].includes('description is empty'),
-    'publishing an unbound file to an issue link asks first, got: ' + warnings.join(' | '));
+  assert(warnings.length === 1 && warnings[0].includes('PROJ-2 "Add two-factor login"') && warnings[0].includes('description is empty') &&
+    warnings[0].includes('Its summary stays.'), 'publishing an unbound file to an issue link asks once, got: ' + warnings.join(' | '));
   assert(!sent.some((r) => r.method === 'PUT') && disk.get(GUIDE) === GUIDE_TEXT, 'declining changes nothing');
-  answers.warning = 'Replace the description';
+  answers.warning = 'Publish';
   const replaced = await publishIssueCommand(uri(GUIDE));
   const replacePut = sent.find((r) => r.method === 'PUT');
   assert(!errors.length && replaced && replaced.key === 'PROJ-2' && replaced.action === 'updated',
@@ -543,7 +545,7 @@ async function main() {
     replacePut.body.fields.description.startsWith('h1. Login guide\n\nUse [the config|'),
   'only the description is replaced, and it keeps the file\'s heading, got: ' + JSON.stringify(replacePut.body));
   let guide = disk.get(GUIDE);
-  assert(guide.startsWith('---\njira:\n  url: ' + SITE + '/browse/PROJ-2\n  updated: 2026-10-29T09:00:00.000+0000\n  keepSummary: true\n' +
+  assert(guide.startsWith('---\njira:\n  url: ' + SITE + '/browse/PROJ-2\n  updated: 2026-10-29T09:00:00.000+0000\n' +
     'confluence:\n  url: https://acme.atlassian.net/wiki/spaces/DOC/pages/77\n  version: 4\ntype: confluence-page\n---\n\n# Login guide\n'),
   'the file is bound to the issue next to its Confluence binding, got:\n' + guide);
   const refreshed = disk.get(DOWNLOADED);
@@ -553,6 +555,7 @@ async function main() {
   assert(Array.from(disk.keys()).filter((k) => k.startsWith('/w/jira/')).length === 1, 'no second file is made in the package');
 
   reset();
+  settings = ONLY_DESCRIPTION;
   disk.set(GUIDE, guide.replace('Use [the config]', 'Now use [the config]'));
   routes = [
     { match: '/rest/api/2/issue/PROJ-2?fields=updated', body: { fields: { updated: '2026-10-29T10:00:00.000+0000' } } },
@@ -562,10 +565,38 @@ async function main() {
   await publishIssueCommand(uri(GUIDE));
   const again = sent.find((r) => r.method === 'PUT');
   assert(!errors.length && !warnings.length && Object.keys(again.body.fields).join() === 'description',
-    'a bound file keeps the issue summary on later publishes, without asking, got: ' + JSON.stringify(again && again.body));
-  assert(disk.get(GUIDE).includes('  keepSummary: true\n') && disk.get(GUIDE).includes('  version: 4\n'), 'both bindings stay');
+    'with publishFields set to description a bound file keeps the issue summary, without asking, got: ' + JSON.stringify(again && again.body));
+  assert(again.body.fields.description.startsWith('h1. Login guide\n\nNow use'), 'the heading leads the description');
+  assert(disk.get(GUIDE).includes('  version: 4\n') && !disk.get(GUIDE).includes('keepSummary'), 'both bindings stay, with no flag');
 
   reset();
+  settings = { downloadFolder: 'jira', descriptionFormat: 'wiki', publishFields: 'summary' };
+  disk.set(GUIDE, guide);
+  routes = [
+    { match: '/rest/api/2/issue/PROJ-2?fields=updated', body: { fields: { updated: '2026-10-29T10:00:00.000+0000' } } },
+    { match: '/rest/api/2/issue/PROJ-2?', body: issue('PROJ-2', Object.assign({}, STORY.fields, { updated: '2026-10-29T09:00:00.000+0000' })) },
+    { method: 'PUT', match: '/rest/api/2/issue/PROJ-2', status: 204 }
+  ];
+  await publishIssueCommand(uri(GUIDE));
+  const summaryPut = sent.find((r) => r.method === 'PUT');
+  assert(!errors.length && JSON.stringify(summaryPut.body) === '{"fields":{"summary":"Login guide"}}' &&
+    info.some((m) => m.includes('Only the summary was sent.')),
+  'with publishFields set to summary only the heading is sent, got: ' + JSON.stringify(summaryPut && summaryPut.body) + info.join(' | '));
+  assert(disk.get(DOWNLOADED) === undefined, 'nothing is copied, as the description in Jira is not the file\'s');
+
+  reset();
+  disk.set(GUIDE, guide.replace('  updated: 2026-10-29T09:00:00.000+0000\n', '  updated: 2026-10-29T09:00:00.000+0000\n  keepSummary: true\n'));
+  routes = [
+    { match: '/rest/api/2/issue/PROJ-2?fields=updated', body: { fields: { updated: '2026-10-29T10:00:00.000+0000' } } },
+    { match: '/rest/api/2/issue/PROJ-2?', body: issue('PROJ-2', Object.assign({}, STORY.fields, { updated: '2026-10-29T09:00:00.000+0000' })) },
+    { method: 'PUT', match: '/rest/api/2/issue/PROJ-2', status: 204 }
+  ];
+  await publishIssueCommand(uri(GUIDE));
+  assert(Object.keys(sent.find((r) => r.method === 'PUT').body.fields).join() === 'description',
+    'a file bound with keepSummary by 1.5.0 still sends only the description');
+
+  reset();
+  settings = ONLY_DESCRIPTION;
   disk.set(GUIDE, guide);
   routes = [{ match: '/rest/api/2/issue/PROJ-2?', body: issue('PROJ-2', Object.assign({}, STORY.fields, {
     updated: '2026-10-30T09:00:00.000+0000', description: 'Edited *in Jira*.' })) }];
@@ -576,6 +607,7 @@ async function main() {
     'a pull keeps the file\'s own title and its Confluence binding, got:\n' + guide);
 
   reset();
+  settings = ONLY_DESCRIPTION;
   disk.set(GUIDE, guide);
   routes = [{ match: '/rest/api/2/issue/PROJ-2?', body: issue('PROJ-2', Object.assign({}, STORY.fields, {
     updated: '2026-10-31T09:00:00.000+0000', description: 'h1. Login guide\n\nEdited again.' })) }];
@@ -595,14 +627,14 @@ async function main() {
   answers.input = SITE + '/browse/PROJ-1';
   let epicChoices = [];
   answers.pick = (items) => { epicChoices = items; return items[1]; };
-  answers.warning = 'Replace the description and the summary';
+  answers.warning = 'Publish';
   await publishIssueCommand(uri(NEW));
   const epicPut = sent.find((r) => r.method === 'PUT');
   assert(epicChoices.length === 2 && epicChoices[0].label.includes('Create a new issue in epic PROJ-1') &&
     epicChoices[1].label.includes('Replace the description of epic PROJ-1'), 'an epic link offers both, got: ' + JSON.stringify(epicChoices));
   assert(!errors.length && epicPut && epicPut.body.fields.summary === 'Add an audit log' && !sent.some((r) => r.method === 'POST'),
     'the epic\'s summary and description are replaced, got: ' + errors.join(' | '));
-  assert(!disk.get(NEW).includes('keepSummary'), 'replacing the summary too needs no flag');
+  assert(warnings[0].includes('Its summary becomes "Add an audit log".'), 'by default the summary is replaced too, got: ' + warnings[0]);
   assert(disk.has('/w/jira/PROJ-1_Add_an_audit_log/PROJ-1_Add_an_audit_log.md'), 'the epic gets its package, got: ' + Array.from(disk.keys()).join(', '));
 
   reset();
@@ -614,7 +646,7 @@ async function main() {
     { method: 'PUT', match: '/rest/api/2/issue/PROJ-2', status: 204 }
   ];
   answers.input = SITE + '/browse/PROJ-2';
-  answers.warning = 'Replace the description';
+  answers.warning = 'Publish';
   await publishIssueCommand(uri(NEW));
   assert(!errors.length && warnings[0].includes('current description is replaced') && disk.size === 1,
     'without a download folder nothing is copied, got: ' + Array.from(disk.keys()).join(', '));

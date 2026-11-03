@@ -71,14 +71,16 @@ Jira** in the Markdown preview. For a bound file the button asks first and saves
 unsaved edits.
 
 - **A bound file** (with a `jira:` block) updates its issue: the `#` heading
-  becomes the summary and the rest the description. If the issue changed in
+  becomes the summary and the rest the description. Set
+  `jiraToMd.publishFields` to `description` to send only the description (the
+  heading stays in it and the issue keeps its summary), or to `summary` to send
+  only the summary. If the issue changed in
   Jira since your last download or publish, the extension asks before
   overwriting it.
 - **An unbound file** asks for a link:
   - **an issue** — the file replaces the issue's description, e.g. of an issue
-    created with an empty one. You choose whether its summary stays or becomes
-    the file's `#` heading. When the summary stays, the heading goes into the
-    description as its first line. A kept summary stays on later publishes too.
+    created with an empty one, and its summary, as `jiraToMd.publishFields`
+    says. You confirm once.
   - **an epic** — choose between a new Story or Task in the epic and replacing
     the epic's description.
   - **a project** — a new Story or Task in the project. Without a `#` heading,
@@ -117,6 +119,7 @@ the Markdown that survives a round trip.
 | `jiraToMd.email` | — | Atlassian account e-mail. Cloud only. |
 | `jiraToMd.downloadFolder` | — | Where to save issues. Empty = the active file's folder. Relative paths start at the workspace root; `~` and absolute paths work too. |
 | `jiraToMd.askSubfolder` | `false` | Ask for an optional subfolder of the download folder, e.g. `services/account`. |
+| `jiraToMd.publishFields` | `all` | What Publish sends to an existing issue: `all` (summary from the `#` heading and description), `description` only (the heading stays in it), or `summary` only. A new issue always gets both. |
 | `jiraToMd.descriptionFormat` | `html` | How Publish writes the description: `html` for fields edited in a rich-text editor, `wiki` for the standard Jira wiki markup, `auto` to follow the issue's current format. |
 
 The token is stored in VS Code settings, which may be synced or shared.

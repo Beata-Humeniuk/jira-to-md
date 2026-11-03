@@ -12,12 +12,20 @@ This file lists user-visible changes to Jira to Markdown. The project follows
   was. An unchanged diagram is not drawn or uploaded again. A diagram Mermaid
   cannot draw goes as code, and the message says why. Pull turns the images
   back into the ` ```mermaid ` blocks.
+- `jiraToMd.publishFields` sets what Publish sends to an existing issue:
+  `all` (default, summary and description), `description` or `summary`.
+
+### Changed
+
+- Publishing a file to an existing issue no longer asks whether to keep the
+  issue's summary; `jiraToMd.publishFields` decides. Files bound with that
+  choice in 1.5.0 keep it.
 
 ### Fixed
 
-- Publishing only the description of an existing issue (the issue keeps its
-  summary) no longer drops the file's `#` heading: it is the first line of the
-  description. Pull does not add the heading a second time.
+- Publishing only the description no longer drops the file's `#` heading: it
+  is the first line of the description. Pull does not add the heading a second
+  time.
 
 ## [1.5.0] - 2026-10-30
 

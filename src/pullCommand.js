@@ -4,6 +4,7 @@ const { parseFrontMatter } = require('./frontMatter');
 const { parseJiraUrl } = require('./jiraClient');
 const { contextAndIssue } = require('./issues');
 const { pulledDocument } = require('./issueDocument');
+const { publishedFields } = require('./config');
 const { credentialsFor } = require('./credentials');
 const { errorMessage } = require('./messages');
 
@@ -44,7 +45,7 @@ async function pullDocument(document) {
   }
   if (!await confirmPull(document, meta.updated, issue.updated)) return;
 
-  await writeDocument(document, pulledDocument(issue, document.getText()));
+  await writeDocument(document, pulledDocument(issue, document.getText(), publishedFields(document.uri) === 'description'));
   vscode.window.showInformationMessage('Pulled ' + issue.key + ' "' + issue.summary + '".');
 }
 

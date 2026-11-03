@@ -86,6 +86,22 @@
           "default": false,
           "description": "Ask for an optional subfolder of the download folder, e.g. services/account."
         },
+        "jiraToMd.publishFields": {
+          "scope": "resource",
+          "type": "string",
+          "enum": [
+            "all",
+            "description",
+            "summary"
+          ],
+          "default": "all",
+          "enumDescriptions": [
+            "The # heading becomes the summary and the rest the description.",
+            "Only the description; the issue keeps its summary and the # heading stays in the description.",
+            "Only the summary, from the # heading; the issue keeps its description."
+          ],
+          "description": "What Publish sends to an existing issue. A new issue always gets both."
+        },
         "jiraToMd.descriptionFormat": {
           "type": "string",
           "enum": [

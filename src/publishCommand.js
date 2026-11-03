@@ -16,11 +16,10 @@ const { publishedDocument } = require('./issueDocument');
 const { readSavedIssues, confirmOverwrite } = require('./savedIssues');
 const { credentialsFor } = require('./credentials');
 const { errorMessage } = require('./messages');
-const { descriptionFormat, packageRootUri } = require('./config');
+const { descriptionFormat, packageRootUri, publishedFields } = require('./config');
 
 const ISSUE_TYPES = ['Story', 'Task'];
-const REPLACE_DESCRIPTION = 'Replace the description';
-const REPLACE_BOTH = 'Replace the description and the summary';
+const PUBLISH = 'Publish';
 
 function baseName(path) {
   return String(path || '').split(/[\\/]/).pop() || '';
@@ -204,10 +203,17 @@ function savedNote(uri) {
   return uri ? ' Saved to ' + vscode.workspace.asRelativePath(uri, false) + '.' : '';
 }
 
-// body is the whole file below the front matter: with the issue's summary kept, the # heading is
-// not the summary, so it stays in the description.
+// What jiraToMd.publishFields sends to an existing issue; a binding with keepSummary (1.5.0) sends
+// only the description.
+function fieldsToPublish(source, meta) {
+  return meta.keepSummary ? 'description' : publishedFields(source.uri);
+}
+
+// body is the whole file below the front matter: when only the description is published, the
+// # heading is not the summary, so it stays in the description.
 async function publishUpdate(source, meta, title, titled, body) {
-  const content = meta.keepSummary ? body.replace(/^\s+/, '') : titled;
+  const mode = fieldsToPublish(source, meta);
+  const content = mode === 'description' ? body.replace(/^\s+/, '') : titled;
   const parsed = parseJiraUrl(meta.url);
   if (!parsed || !parsed.issueKey) throw new Error('bad-url');
   const creds = await credentialsFor(parsed.site);
@@ -223,20 +229,25 @@ async function publishUpdate(source, meta, title, titled, body) {
     if (picked !== overwrite) return;
   }
 
-  const summary = meta.keepSummary ? current.summary : title;
+  const summary = mode === 'description' ? current.summary : title;
   const { updated, attached } = await withNotification('Publishing ' + current.key + ' to Jira…', async () => {
+    if (mode === 'summary') {
+      await updateIssue(creds, parsed.site, current.key, { fields: { summary } });
+      return { updated: await fetchIssue(creds, parsed.site, current.key, ['updated']), attached: null };
+    }
     const files = await attachLinkedFiles(creds, parsed.site, current.key, source, content);
     const description = descriptionFor(files.content, current.fields.description, files.links);
-    const fields = meta.keepSummary ? { description } : { summary, description };
+    const fields = mode === 'description' ? { description } : { summary, description };
     await updateIssue(creds, parsed.site, current.key, { fields });
     return { updated: await fetchIssue(creds, parsed.site, current.key, ['updated']), attached: files };
   });
 
   await writeBinding(source, Object.assign({}, meta, { updated: updated.fields.updated }));
-  const copy = await saveToPackage(source,
+  // With only the summary sent, the description in Jira is not the file's, so there is nothing to copy.
+  const copy = mode === 'summary' ? null : await saveToPackage(source,
     Object.assign({}, current, { summary, updated: updated.fields.updated }), null, content);
   vscode.window.showInformationMessage('Published ' + current.key + ' "' + summary + '".' +
-    attachedNote(attached) + savedNote(copy));
+    (attached ? attachedNote(attached) : ' Only the summary was sent.') + savedNote(copy));
   return { url: meta.url, key: current.key, action: 'updated' };
 }
 
@@ -262,18 +273,24 @@ async function pickEpicAction(epic, title) {
 }
 
 // Binds the file to an issue that already exists, e.g. one created with an empty description.
+// jiraToMd.publishFields says what is replaced, so this is asked only once, for the binding.
+function replacedPart(mode, target, title) {
+  const description = target.description.trim() ? 'Its current description is replaced.' : 'Its description is empty.';
+  const summary = title === target.summary ? '' : ' Its summary becomes "' + title + '".';
+  if (mode === 'summary') return summary ? summary.trim() + ' Its description stays.' : 'Its summary is already "' + title + '".';
+  if (mode === 'description') return description + ' Its summary stays.';
+  return description + summary;
+}
+
 async function replaceExisting(source, target, title, content, body) {
-  const empty = !target.description.trim();
-  const buttons = title === target.summary ? [REPLACE_DESCRIPTION] : [REPLACE_DESCRIPTION, REPLACE_BOTH];
+  const mode = publishedFields(source.uri);
   const picked = await vscode.window.showWarningMessage(
-    'Publish this file as the description of ' + target.key + ' "' + target.summary + '"? ' +
-    (empty ? 'Its description is empty.' : 'Its current description is replaced.') +
-    (buttons.length > 1 ? ' Keep its summary, or replace it with "' + title + '"?' : '') +
-    ' The file is bound to the issue, so later publishes update it.',
-    { modal: true }, ...buttons);
-  if (!picked) return;
+    'Publish this file to ' + target.key + ' "' + target.summary + '"? ' + replacedPart(mode, target, title) +
+    ' The file is bound to the issue, so later publishes update it. ' +
+    'What is published is set by jiraToMd.publishFields.',
+    { modal: true }, PUBLISH);
+  if (picked !== PUBLISH) return;
   const meta = { url: issueWebUrl(target.site, target.key), updated: target.updated };
-  if (picked === REPLACE_DESCRIPTION && buttons.length > 1) meta.keepSummary = true;
   return publishUpdate(source, meta, title, content, body);
 }
 

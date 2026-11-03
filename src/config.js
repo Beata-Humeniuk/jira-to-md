@@ -43,6 +43,12 @@ function packageRootUri(resource) {
   return base ? vscode.Uri.joinPath(base, ...target.segments) : null;
 }
 
+// What Publish sends to an issue the file is bound to: all, description or summary.
+function publishedFields(resource) {
+  const value = String(settings(resource).get('publishFields') || '').trim().toLowerCase();
+  return value === 'description' || value === 'summary' ? value : 'all';
+}
+
 function askSubfolder() {
   return settings(settingsResource(activeDocument())).get('askSubfolder') === true;
 }
@@ -61,4 +67,4 @@ function descriptionFormat() {
   return value === 'wiki' || value === 'auto' ? value : 'html';
 }
 
-module.exports = { downloadFolderUri, packageRootUri, askSubfolder, configuredToken, configuredEmail, descriptionFormat };
+module.exports = { downloadFolderUri, packageRootUri, publishedFields, askSubfolder, configuredToken, configuredEmail, descriptionFormat };
