@@ -12,14 +12,21 @@ This file lists user-visible changes to Jira to Markdown. The project follows
   was. An unchanged diagram is not drawn or uploaded again. A diagram Mermaid
   cannot draw goes as code, and the message says why. Pull turns the images
   back into the ` ```mermaid ` blocks.
-- `jiraToMd.publishFields` sets what Publish sends to an existing issue:
-  `all` (default, summary and description), `description` or `summary`.
+- Comments: Pull and Download list the issue's comments at the end of the file,
+  with their authors and dates. Publish adds the comments you write there and
+  updates the ones you change.
+- Files: Pull and Download save the issue's attachments next to the file, in
+  `attachments/<KEY>/`, and links to them lead there. Publish uploads files the
+  file links to, also from the Attachments section at its end.
+- `jiraToMd.sync` has a checkbox for each part: summary, description, comments
+  and files. Publish sends the checked parts, and Pull and Download bring them
+  back. All are checked by default.
 
 ### Changed
 
 - Publishing a file to an existing issue no longer asks whether to keep the
-  issue's summary; `jiraToMd.publishFields` decides. Files bound with that
-  choice in 1.5.0 keep it.
+  issue's summary; `jiraToMd.sync` decides. Files bound with that choice in
+  1.5.0 keep it.
 
 ### Fixed
 

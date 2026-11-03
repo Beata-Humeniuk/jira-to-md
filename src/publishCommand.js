@@ -5,18 +5,20 @@ const { mdToHtml } = require('./mdToHtml');
 const { looksLikeHtml } = require('./htmlToMd');
 const { parseFrontMatter, serializeFrontMatter } = require('./frontMatter');
 const {
-  parseJiraUrl, isCloud, issueWebUrl, fetchIssue, createIssue, updateIssue, uploadAttachment, downloadAttachment
+  parseJiraUrl, isCloud, issueWebUrl, fetchIssue, createIssue, updateIssue, uploadAttachment, downloadAttachment,
+  fetchComments, addComment, updateComment
 } = require('./jiraClient');
 const { localTargets, rebaseLinks } = require('./attachments');
 const { diagramsIn, withDiagramImages } = require('./mermaidImages');
 const { renderDiagrams } = require('./mermaidRenderer');
 const { contextAndIssue } = require('./issues');
 const { issueFileName } = require('./fileNames');
-const { publishedDocument } = require('./issueDocument');
+const { publishedDocument, commentMarkdown } = require('./issueDocument');
+const { splitSections, joinSections, shiftHeadings, commentHeading } = require('./sections');
 const { readSavedIssues, confirmOverwrite } = require('./savedIssues');
 const { credentialsFor } = require('./credentials');
 const { errorMessage } = require('./messages');
-const { descriptionFormat, packageRootUri, publishedFields } = require('./config');
+const { descriptionFormat, packageRootUri, syncParts } = require('./config');
 
 const ISSUE_TYPES = ['Story', 'Task'];
 const PUBLISH = 'Publish';
@@ -86,16 +88,18 @@ async function attachDiagrams(creds, site, key, diagrams, attachments, links) {
 }
 
 // Files the description links to (./config.ts) go to Jira as attachments of the issue, so the
-// links still lead somewhere there. An attachment with the same name and content is reused.
-// content comes back with the drawn diagrams as images.
-async function attachLinkedFiles(creds, site, key, source, content) {
+// links still lead somewhere there; so do those in `extra` (the Attachments section, the comments).
+// An attachment with the same name and content is reused. With options.files off nothing is uploaded
+// but the drawn diagrams; content comes back with them as images.
+async function attachLinkedFiles(creds, site, key, source, content, options) {
   const files = [];
-  for (const target of localTargets(content)) {
+  const targets = options.files ? localTargets(content + '\n\n' + (options.extra || '')) : [];
+  for (const target of targets) {
     const uri = attachableUri(source, target.path);
     const bytes = uri && await readLocalFile(uri);
     if (bytes) files.push({ ...target, bytes });
   }
-  const diagrams = diagramsIn(content);
+  const diagrams = options.diagrams ? diagramsIn(content) : [];
   if (!files.length && !diagrams.length) return { content, links: undefined, uploaded: [], drawn: 0, failed: [] };
 
   const attachments = (await fetchIssue(creds, site, key, ['attachment'])).fields.attachment || [];
@@ -120,6 +124,49 @@ async function attachLinkedFiles(creds, site, key, source, content) {
   const { drawn, failed } = await attachDiagrams(creds, site, key, diagrams, attachments, links);
   const named = new Set(diagrams.map((d) => d.name).filter((name) => links[name]));
   return { content: withDiagramImages(content, named), links, uploaded, drawn, failed };
+}
+
+function countOf(n, word) {
+  return n + ' ' + word + (n === 1 ? '' : 's');
+}
+
+// Comments of the file without an id are added to the issue; changed ones are updated, which Jira
+// allows only to their author (or an admin). Comments deleted from the file stay in Jira.
+async function publishComments(creds, site, issue, local, links, body) {
+  const remote = new Map((await fetchComments(creds, site, issue.key)).map((c) => [String(c.id), c]));
+  const list = [];
+  const failed = [];
+  let added = 0;
+  let updated = 0;
+  for (const comment of local) {
+    const md = shiftHeadings(comment.md, -3);
+    if (!comment.md.trim()) {
+      list.push(comment);
+    } else if (!comment.id) {
+      const made = await addComment(creds, site, issue.key, descriptionFor(md, issue.fields.description, links));
+      list.push({ id: String(made.id), heading: commentHeading(made), md: comment.md });
+      added++;
+    } else {
+      list.push(comment);
+      const current = remote.get(comment.id);
+      if (!current || commentMarkdown(issue, current, body) === comment.md.trim()) continue;
+      try {
+        await updateComment(creds, site, issue.key, comment.id, descriptionFor(md, current.body, links));
+        updated++;
+      } catch (e) {
+        failed.push(comment.heading.replace(/\s*<!--[\s\S]*$/, ''));
+      }
+    }
+  }
+  return { list, added, updated, failed };
+}
+
+function commentsNote(comments) {
+  if (!comments) return '';
+  return (comments.added ? ' Added ' + countOf(comments.added, 'comment') + '.' : '') +
+    (comments.updated ? ' Updated ' + countOf(comments.updated, 'comment') + '.' : '') +
+    (comments.failed.length ? ' Jira refused to change ' + countOf(comments.failed.length, 'comment') +
+      ' (only their authors can): ' + comments.failed.join('; ') + '.' : '');
 }
 
 function attachedNote({ uploaded, drawn, failed }) {
@@ -199,21 +246,65 @@ async function saveToPackage(source, issue, epic, content) {
   return uri;
 }
 
+// The file without its front matter, with the comments' new ids, when comments were added.
+async function writeBody(source, body) {
+  const text = source.editor ? source.editor.document.getText() : source.text;
+  const { rawLength } = parseFrontMatter(text);
+  if (!source.editor) {
+    source.text = text.slice(0, rawLength) + body;
+    await vscode.workspace.fs.writeFile(source.uri, Buffer.from(source.text, 'utf8'));
+    return;
+  }
+  const document = source.editor.document;
+  await source.editor.edit((edit) => {
+    edit.replace(new vscode.Range(document.positionAt(rawLength), document.positionAt(text.length)), body);
+  });
+}
+
+// The file's own parts: the # heading, the description, and the Comments and Attachments sections.
+function fileDocument(source) {
+  const { meta, body } = parseFrontMatter(source.text);
+  const sections = splitSections(body);
+  const { title, content } = splitTitleAndBody(sections.main, source.fileName.replace(/\.md$/i, '') || 'Untitled');
+  return { meta, body, title, content, main: sections.main, comments: sections.comments, attachments: sections.attachments };
+}
+
+function sectionsText(doc) {
+  return [doc.attachments || ''].concat((doc.comments || []).map((c) => c.md)).join('\n\n');
+}
+
+// Publishing comments gives the new ones ids, which the file has to keep.
+async function afterComments(source, doc, comments) {
+  if (!comments || !comments.added) return doc.comments;
+  await writeBody(source, joinSections(doc.main, comments.list, doc.attachments));
+  return comments.list;
+}
+
+function partsNote(parts) {
+  const sent = ['summary', 'description', 'comments', 'attachments'].filter((p) => parts[p]);
+  return sent.length === 4 ? '' : ' Sent: ' + (sent.join(', ') || 'nothing') + ' (jiraToMd.sync).';
+}
+
 function savedNote(uri) {
   return uri ? ' Saved to ' + vscode.workspace.asRelativePath(uri, false) + '.' : '';
 }
 
-// What jiraToMd.publishFields sends to an existing issue; a binding with keepSummary (1.5.0) sends
-// only the description.
-function fieldsToPublish(source, meta) {
-  return meta.keepSummary ? 'description' : publishedFields(source.uri);
+// What Publish sends to an existing issue (jiraToMd.sync); a binding made by 1.5.0 with the issue's
+// summary kept never sends the summary.
+function partsFor(source, meta) {
+  const parts = syncParts(source.uri);
+  if (meta.keepSummary) parts.summary = false;
+  return parts;
 }
 
-// body is the whole file below the front matter: when only the description is published, the
-// # heading is not the summary, so it stays in the description.
-async function publishUpdate(source, meta, title, titled, body) {
-  const mode = fieldsToPublish(source, meta);
-  const content = mode === 'description' ? body.replace(/^\s+/, '') : titled;
+// Without the summary the # heading is not the summary, so it stays in the description.
+async function publishUpdate(source, meta, doc) {
+  const parts = partsFor(source, meta);
+  if (!Object.values(parts).some(Boolean)) {
+    vscode.window.showWarningMessage('Nothing to publish: every part of jiraToMd.sync is off.');
+    return;
+  }
+  const content = parts.summary ? doc.content : doc.main.replace(/^\s+/, '');
   const parsed = parseJiraUrl(meta.url);
   if (!parsed || !parsed.issueKey) throw new Error('bad-url');
   const creds = await credentialsFor(parsed.site);
@@ -229,25 +320,27 @@ async function publishUpdate(source, meta, title, titled, body) {
     if (picked !== overwrite) return;
   }
 
-  const summary = mode === 'description' ? current.summary : title;
-  const { updated, attached } = await withNotification('Publishing ' + current.key + ' to Jira…', async () => {
-    if (mode === 'summary') {
-      await updateIssue(creds, parsed.site, current.key, { fields: { summary } });
-      return { updated: await fetchIssue(creds, parsed.site, current.key, ['updated']), attached: null };
-    }
-    const files = await attachLinkedFiles(creds, parsed.site, current.key, source, content);
-    const description = descriptionFor(files.content, current.fields.description, files.links);
-    const fields = mode === 'description' ? { description } : { summary, description };
-    await updateIssue(creds, parsed.site, current.key, { fields });
-    return { updated: await fetchIssue(creds, parsed.site, current.key, ['updated']), attached: files };
+  const summary = parts.summary ? doc.title : current.summary;
+  const { updated, attached, comments } = await withNotification('Publishing ' + current.key + ' to Jira…', async () => {
+    const files = await attachLinkedFiles(creds, parsed.site, current.key, source, parts.description ? content : '',
+      { files: parts.attachments, diagrams: parts.description, extra: sectionsText(doc) });
+    const fields = {};
+    if (parts.summary) fields.summary = summary;
+    if (parts.description) fields.description = descriptionFor(files.content, current.fields.description, files.links);
+    if (Object.keys(fields).length) await updateIssue(creds, parsed.site, current.key, { fields });
+    const posted = parts.comments && doc.comments
+      ? await publishComments(creds, parsed.site, current, doc.comments, files.links, doc.body) : null;
+    return { updated: await fetchIssue(creds, parsed.site, current.key, ['updated']), attached: files, comments: posted };
   });
 
+  const commentList = await afterComments(source, doc, comments);
   await writeBinding(source, Object.assign({}, meta, { updated: updated.fields.updated }));
-  // With only the summary sent, the description in Jira is not the file's, so there is nothing to copy.
-  const copy = mode === 'summary' ? null : await saveToPackage(source,
-    Object.assign({}, current, { summary, updated: updated.fields.updated }), null, content);
+  // The copy mirrors the issue, so with the description not sent there is nothing to copy.
+  const copy = !parts.description ? null : await saveToPackage(source,
+    Object.assign({}, current, { summary, updated: updated.fields.updated }), null,
+    joinSections(content, commentList, doc.attachments));
   vscode.window.showInformationMessage('Published ' + current.key + ' "' + summary + '".' +
-    (attached ? attachedNote(attached) : ' Only the summary was sent.') + savedNote(copy));
+    attachedNote(attached) + commentsNote(comments) + partsNote(parts) + savedNote(copy));
   return { url: meta.url, key: current.key, action: 'updated' };
 }
 
@@ -273,28 +366,34 @@ async function pickEpicAction(epic, title) {
 }
 
 // Binds the file to an issue that already exists, e.g. one created with an empty description.
-// jiraToMd.publishFields says what is replaced, so this is asked only once, for the binding.
-function replacedPart(mode, target, title) {
-  const description = target.description.trim() ? 'Its current description is replaced.' : 'Its description is empty.';
-  const summary = title === target.summary ? '' : ' Its summary becomes "' + title + '".';
-  if (mode === 'summary') return summary ? summary.trim() + ' Its description stays.' : 'Its summary is already "' + title + '".';
-  if (mode === 'description') return description + ' Its summary stays.';
-  return description + summary;
+// jiraToMd.sync says what is replaced, so this is asked only once, for the binding.
+function replacedPart(parts, target, title) {
+  const out = [];
+  if (parts.summary && title !== target.summary) out.push('Its summary becomes "' + title + '".');
+  if (parts.description) out.push(target.description.trim() ? 'Its current description is replaced.' : 'Its description is empty.');
+  if (parts.comments) out.push('New comments from the file are added.');
+  if (parts.attachments) out.push('Files the file links to are attached.');
+  const kept = [];
+  if (!parts.summary) kept.push('summary');
+  if (!parts.description) kept.push('description');
+  if (kept.length) out.push('Its ' + kept.join(' and ') + ' stay' + (kept.length === 1 ? 's' : '') + '.');
+  return out.join(' ');
 }
 
-async function replaceExisting(source, target, title, content, body) {
-  const mode = publishedFields(source.uri);
+async function replaceExisting(source, target, doc) {
+  const parts = syncParts(source.uri);
   const picked = await vscode.window.showWarningMessage(
-    'Publish this file to ' + target.key + ' "' + target.summary + '"? ' + replacedPart(mode, target, title) +
+    'Publish this file to ' + target.key + ' "' + target.summary + '"? ' + replacedPart(parts, target, doc.title) +
     ' The file is bound to the issue, so later publishes update it. ' +
-    'What is published is set by jiraToMd.publishFields.',
+    'What is published is set by jiraToMd.sync.',
     { modal: true }, PUBLISH);
   if (picked !== PUBLISH) return;
   const meta = { url: issueWebUrl(target.site, target.key), updated: target.updated };
-  return publishUpdate(source, meta, title, content, body);
+  return publishUpdate(source, meta, doc);
 }
 
-async function publishNew(source, title, content, body) {
+async function publishNew(source, doc) {
+  const { title, content } = doc;
   const parsed = await askForTarget();
   if (!parsed) return;
   const creds = await credentialsFor(parsed.site);
@@ -302,11 +401,11 @@ async function publishNew(source, title, content, body) {
 
   const { ctx, issue: target } = await withNotification('Checking the issue in Jira…',
     () => contextAndIssue(creds, parsed.site, parsed.issueKey));
-  if (target && !target.isEpic) return replaceExisting(source, target, title, content, body);
+  if (target && !target.isEpic) return replaceExisting(source, target, doc);
   if (target) {
     const action = await pickEpicAction(target, title);
     if (!action) return;
-    if (action === 'replace') return replaceExisting(source, target, title, content, body);
+    if (action === 'replace') return replaceExisting(source, target, doc);
   }
   const epic = target;
 
@@ -324,25 +423,33 @@ async function publishNew(source, title, content, body) {
   if (epic && ctx.epicLinkId) fields[ctx.epicLinkId] = epic.key;
   else if (epic && isCloud(parsed.site)) fields.parent = { key: epic.key };
 
+  // A new issue always gets its summary and description; files and comments follow jiraToMd.sync.
+  const parts = syncParts(source.uri);
   const created = await withNotification('Creating the issue in Jira…', async () => {
     const made = await createIssue(creds, parsed.site, fields);
     // Attachments need the issue, so links to local files are fixed once it exists.
-    const files = await attachLinkedFiles(creds, parsed.site, made.key, source, content);
+    const files = await attachLinkedFiles(creds, parsed.site, made.key, source, content,
+      { files: parts.attachments, diagrams: true, extra: sectionsText(doc) });
     if (files.links) {
       const linked = descriptionFor(files.content, epic && epic.fields.description, files.links);
       await updateIssue(creds, parsed.site, made.key, { fields: { description: linked } });
     }
+    const issue = { key: made.key, fields: { description } };
+    const posted = parts.comments && doc.comments
+      ? await publishComments(creds, parsed.site, issue, doc.comments, files.links, doc.body) : null;
     const fresh = await fetchIssue(creds, parsed.site, made.key, ['updated']);
-    return { key: made.key, updated: fresh.fields.updated, attached: files };
+    return { key: made.key, updated: fresh.fields.updated, attached: files, comments: posted };
   });
 
   const url = issueWebUrl(parsed.site, created.key);
+  const commentList = await afterComments(source, doc, created.comments);
   await writeBinding(source, { url, updated: created.updated });
   const copy = await saveToPackage(source, {
     key: created.key, summary: title, type, updated: created.updated, epic: epic ? epic.key : '', site: parsed.site
-  }, epic, content);
+  }, epic, joinSections(content, commentList, doc.attachments));
   vscode.window.showInformationMessage('Created ' + created.key + ' "' + title + '"' +
-    (epic ? ' in epic ' + epic.key : '') + '.' + attachedNote(created.attached) + savedNote(copy));
+    (epic ? ' in epic ' + epic.key : '') + '.' + attachedNote(created.attached) + commentsNote(created.comments) +
+    savedNote(copy));
   return { url, key: created.key, action: 'created' };
 }
 
@@ -355,11 +462,8 @@ async function publishIssueCommand(fileUri) {
 
   try {
     const source = fileUri ? await uriSource(fileUri) : editorSource(editor);
-    const { meta, body } = parseFrontMatter(source.text);
-    const { title, content } = splitTitleAndBody(body, source.fileName.replace(/\.md$/i, '') || 'Untitled');
-    return meta
-      ? await publishUpdate(source, meta, title, content, body)
-      : await publishNew(source, title, content, body);
+    const doc = fileDocument(source);
+    return doc.meta ? await publishUpdate(source, doc.meta, doc) : await publishNew(source, doc);
   } catch (e) {
     if (fileUri) throw new Error(errorMessage(e));
     vscode.window.showErrorMessage(errorMessage(e));

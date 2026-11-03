@@ -86,21 +86,39 @@
           "default": false,
           "description": "Ask for an optional subfolder of the download folder, e.g. services/account."
         },
-        "jiraToMd.publishFields": {
+        "jiraToMd.sync": {
           "scope": "resource",
-          "type": "string",
-          "enum": [
-            "all",
-            "description",
-            "summary"
-          ],
-          "default": "all",
-          "enumDescriptions": [
-            "The # heading becomes the summary and the rest the description.",
-            "Only the description; the issue keeps its summary and the # heading stays in the description.",
-            "Only the summary, from the # heading; the issue keeps its description."
-          ],
-          "description": "What Publish sends to an existing issue. A new issue always gets both."
+          "type": "object",
+          "markdownDescription": "What **Publish** sends to an issue the file is bound to, and what **Pull** and **Download** bring back. A new issue always gets its summary and description.",
+          "properties": {
+            "summary": {
+              "type": "boolean",
+              "default": true,
+              "description": "Summary: the # heading of the file."
+            },
+            "description": {
+              "type": "boolean",
+              "default": true,
+              "description": "Description: the rest of the file, with its Mermaid diagrams as images."
+            },
+            "comments": {
+              "type": "boolean",
+              "default": true,
+              "description": "Comments: the Comments section at the end of the file."
+            },
+            "attachments": {
+              "type": "boolean",
+              "default": true,
+              "description": "Files: attachments of the issue, downloaded next to the file, and files the file links to, uploaded."
+            }
+          },
+          "additionalProperties": false,
+          "default": {
+            "summary": true,
+            "description": true,
+            "comments": true,
+            "attachments": true
+          }
         },
         "jiraToMd.descriptionFormat": {
           "type": "string",

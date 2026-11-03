@@ -54,9 +54,11 @@ function attachmentLinks(md, target) {
   return md;
 }
 
-// After a download, links to attachments of files the previous version linked locally point there again.
-function relinkLocalFiles(md, attachments, previousBody) {
+// After a download, links to attachments of files the previous version linked locally point there again,
+// and so do links to attachments downloaded next to the file (downloaded: filename -> href).
+function relinkLocalFiles(md, attachments, previousBody, downloaded) {
   const local = new Map(localTargets(previousBody).map((t) => [t.name, t.href]));
+  for (const [name, href] of downloaded || []) if (!local.has(name)) local.set(name, href);
   if (!local.size) return md;
   let out = md;
   for (const a of attachments || []) {
@@ -68,6 +70,9 @@ function relinkLocalFiles(md, attachments, previousBody) {
   return out.replace(/\[([^\[\]|\n]*)\|\^([^\]|\n]+)\]|\[\^([^\]|\n]+)\]/g, (m, text, name, bare) => {
     const href = local.get(name || bare);
     return href ? '[' + (text || bare) + '](' + href + ')' : m;
+  }).replace(/!([^!\s|][^!|\n]*)(?:\|[^!\n]*)?!/g, (m, name) => {
+    const href = local.get(name);
+    return href ? '![' + name + '](' + href + ')' : m;
   });
 }
 

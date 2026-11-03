@@ -63,6 +63,54 @@ Jira** button in its top right corner. You can also run **Jira: Pull Issue**.
 The extension compares the issue's last-updated time first. If nothing changed,
 nothing happens. Otherwise it asks before replacing the file content, because
 edits you have not published are lost. Your own front matter keys are kept.
+Pull, like Download, brings back the parts checked in `jiraToMd.sync`; see
+[What is synced](#what-is-synced).
+
+## What is synced
+
+`jiraToMd.sync` has a checkbox for each part of an issue. Publish sends the
+checked parts, and Pull and Download bring them back; all are checked by
+default:
+
+- **Summary** — the file's `#` heading. Unchecked, the heading stays at the
+  top of the description and the issue keeps its summary.
+- **Description** — the rest of the file, with Mermaid diagrams as images.
+- **Comments** — the Comments section at the end of the file. Pull lists the
+  issue's comments there, each under a `###` heading with its author and date.
+  To add a comment, write a `###` heading of your own (its text is not sent)
+  with the comment below it, and publish. A changed comment is updated, which
+  Jira allows only to its author; a comment you delete from the file stays in
+  Jira.
+- **Files** — the issue's attachments are downloaded next to the file, into
+  `attachments/<KEY>/`, links to them lead there, and the Attachments section
+  at the end of the file lists them. Publish uploads files the file links to,
+  including those listed in that section; a file Jira already has is not
+  uploaded again.
+
+A new issue always gets its summary and description.
+
+```markdown
+# Add two-factor login
+
+Users need stronger logins.
+
+## Comments <!-- jira-comments -->
+
+### Anna Nowak, 2026-10-02 09:15 <!-- jira-comment 101 -->
+
+Looks good.
+
+### My new comment
+
+Please check the error messages too.
+
+## Attachments <!-- jira-attachments -->
+
+- [mockup.png](./attachments/PROJ-2/mockup.png)
+```
+
+The `<!-- … -->` markers are hidden in the preview; keep them, as they tell the
+sections and the comments apart.
 
 ## Publish to Jira
 
@@ -71,16 +119,14 @@ Jira** in the Markdown preview. For a bound file the button asks first and saves
 unsaved edits.
 
 - **A bound file** (with a `jira:` block) updates its issue: the `#` heading
-  becomes the summary and the rest the description. Set
-  `jiraToMd.publishFields` to `description` to send only the description (the
-  heading stays in it and the issue keeps its summary), or to `summary` to send
-  only the summary. If the issue changed in
-  Jira since your last download or publish, the extension asks before
+  becomes the summary, the rest the description, and comments and files go
+  too, as checked in [`jiraToMd.sync`](#what-is-synced). If the issue changed
+  in Jira since your last download or publish, the extension asks before
   overwriting it.
 - **An unbound file** asks for a link:
   - **an issue** — the file replaces the issue's description, e.g. of an issue
-    created with an empty one, and its summary, as `jiraToMd.publishFields`
-    says. You confirm once.
+    created with an empty one, and its summary, as `jiraToMd.sync` says. You
+    confirm once.
   - **an epic** — choose between a new Story or Task in the epic and replacing
     the epic's description.
   - **a project** — a new Story or Task in the project. Without a `#` heading,
@@ -119,7 +165,7 @@ the Markdown that survives a round trip.
 | `jiraToMd.email` | — | Atlassian account e-mail. Cloud only. |
 | `jiraToMd.downloadFolder` | — | Where to save issues. Empty = the active file's folder. Relative paths start at the workspace root; `~` and absolute paths work too. |
 | `jiraToMd.askSubfolder` | `false` | Ask for an optional subfolder of the download folder, e.g. `services/account`. |
-| `jiraToMd.publishFields` | `all` | What Publish sends to an existing issue: `all` (summary from the `#` heading and description), `description` only (the heading stays in it), or `summary` only. A new issue always gets both. |
+| `jiraToMd.sync` | all checked | What Publish sends and Pull and Download bring back: summary, description, comments, files. See [What is synced](#what-is-synced). |
 | `jiraToMd.descriptionFormat` | `html` | How Publish writes the description: `html` for fields edited in a rich-text editor, `wiki` for the standard Jira wiki markup, `auto` to follow the issue's current format. |
 
 The token is stored in VS Code settings, which may be synced or shared.

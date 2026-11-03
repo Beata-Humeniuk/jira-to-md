@@ -156,7 +156,25 @@ async function downloadAttachment(cfg, url) {
   return request(cfg, url, { raw: true });
 }
 
+async function fetchComments(cfg, site, key) {
+  const out = [];
+  for (;;) {
+    const j = await apiGet(cfg, site, '/issue/' + encodeURIComponent(key) + '/comment?maxResults=100&startAt=' + out.length);
+    out.push(...(j.comments || []));
+    if (!(j.comments || []).length || out.length >= (j.total || 0)) return out;
+  }
+}
+
+async function addComment(cfg, site, key, body) {
+  return apiSend(cfg, site, 'POST', '/issue/' + encodeURIComponent(key) + '/comment', { body });
+}
+
+async function updateComment(cfg, site, key, id, body) {
+  return apiSend(cfg, site, 'PUT', '/issue/' + encodeURIComponent(key) + '/comment/' + encodeURIComponent(id), { body });
+}
+
 module.exports = {
   parseJiraUrl, hostOf, isCloud, authFor, authHeader, apiRoot, issueWebUrl,
-  fetchFields, fetchIssue, searchIssues, createIssue, updateIssue, uploadAttachment, downloadAttachment
+  fetchFields, fetchIssue, searchIssues, createIssue, updateIssue, uploadAttachment, downloadAttachment,
+  fetchComments, addComment, updateComment
 };

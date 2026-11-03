@@ -149,8 +149,10 @@ global.fetch = async (url, options) => {
     : raw ? JSON.parse(raw) : null;
   sent.push({ method, url: decodeURIComponent(url), body, headers: (options && options.headers) || {} });
   const route = routes.find((r) => (r.method || 'GET') === method && decodeURIComponent(url).indexOf(r.match) >= 0);
-  const status = route ? (route.status || 200) : 404;
-  const reply = route && (typeof route.body === 'function' ? route.body(body) : route.body);
+  // An issue without its own comment route has none.
+  const noComments = !route && method === 'GET' && /\/comment\?/.test(url);
+  const status = route || noComments ? ((route && route.status) || 200) : 404;
+  const reply = noComments ? { comments: [], total: 0 } : route && (typeof route.body === 'function' ? route.body(body) : route.body);
   return {
     ok: status < 300, status, url, json: async () => reply || {},
     arrayBuffer: async () => new TextEncoder().encode(String(reply)).buffer
@@ -507,6 +509,8 @@ async function main() {
 
   reset();
   disk.set(LINKED_FILE, LINKED);
+  disk.set('/w/jira/PROJ-8_Package_change/conf/config.ts', 'export const a = 1;');
+  disk.set('/w/jira/PROJ-8_Package_change/conf/old.ts', 'old');
   const linkedIssue = issue('PROJ-8', { summary: 'Package change', description: linkedHtml, attachment: [CONFIG, OLD],
     updated: '2026-10-28T09:00:00.000+0000' });
   routes = [{ match: '/rest/api/2/issue/PROJ-8?', body: linkedIssue }];
@@ -530,7 +534,7 @@ async function main() {
     { method: 'PUT', match: '/rest/api/2/issue/PROJ-2', status: 204 }
   ];
   answers.input = SITE + '/browse/PROJ-2';
-  const ONLY_DESCRIPTION = { downloadFolder: 'jira', descriptionFormat: 'wiki', publishFields: 'description' };
+  const ONLY_DESCRIPTION = { downloadFolder: 'jira', descriptionFormat: 'wiki', sync: { summary: false } };
   settings = ONLY_DESCRIPTION;
   await publishIssueCommand(uri(GUIDE));
   assert(warnings.length === 1 && warnings[0].includes('PROJ-2 "Add two-factor login"') && warnings[0].includes('description is empty') &&
@@ -565,12 +569,12 @@ async function main() {
   await publishIssueCommand(uri(GUIDE));
   const again = sent.find((r) => r.method === 'PUT');
   assert(!errors.length && !warnings.length && Object.keys(again.body.fields).join() === 'description',
-    'with publishFields set to description a bound file keeps the issue summary, without asking, got: ' + JSON.stringify(again && again.body));
+    'with the summary unchecked a bound file keeps the issue summary, without asking, got: ' + JSON.stringify(again && again.body));
   assert(again.body.fields.description.startsWith('h1. Login guide\n\nNow use'), 'the heading leads the description');
   assert(disk.get(GUIDE).includes('  version: 4\n') && !disk.get(GUIDE).includes('keepSummary'), 'both bindings stay, with no flag');
 
   reset();
-  settings = { downloadFolder: 'jira', descriptionFormat: 'wiki', publishFields: 'summary' };
+  settings = { downloadFolder: 'jira', descriptionFormat: 'wiki', sync: { description: false, comments: false, attachments: false } };
   disk.set(GUIDE, guide);
   routes = [
     { match: '/rest/api/2/issue/PROJ-2?fields=updated', body: { fields: { updated: '2026-10-29T10:00:00.000+0000' } } },
@@ -580,8 +584,8 @@ async function main() {
   await publishIssueCommand(uri(GUIDE));
   const summaryPut = sent.find((r) => r.method === 'PUT');
   assert(!errors.length && JSON.stringify(summaryPut.body) === '{"fields":{"summary":"Login guide"}}' &&
-    info.some((m) => m.includes('Only the summary was sent.')),
-  'with publishFields set to summary only the heading is sent, got: ' + JSON.stringify(summaryPut && summaryPut.body) + info.join(' | '));
+    info.some((m) => m.includes('Sent: summary (jiraToMd.sync).')),
+  'with only the summary checked only the heading is sent, got: ' + JSON.stringify(summaryPut && summaryPut.body) + info.join(' | '));
   assert(disk.get(DOWNLOADED) === undefined, 'nothing is copied, as the description in Jira is not the file\'s');
 
   reset();
@@ -650,6 +654,92 @@ async function main() {
   await publishIssueCommand(uri(NEW));
   assert(!errors.length && warnings[0].includes('current description is replaced') && disk.size === 1,
     'without a download folder nothing is copied, got: ' + Array.from(disk.keys()).join(', '));
+
+  reset();
+  const DRAWN_NAME = require('../src/mermaidImages').diagramName('graph TD\n  A --> B');
+  const SYNCED = '/w/jira/PROJ-2_Add_two-factor_login.md';
+  disk.set(SYNCED, LOCAL + '\n## Comments <!-- jira-comments -->\n\n### Mine, not sent\n\nPlease check *this*.\n');
+  const SHOT = { id: '50', filename: 'shot.png', size: 4, created: '2026-10-01T10:00:00.000+0000', content: SITE + '/secure/attachment/50/shot.png' };
+  const SPEC = { id: '51', filename: 'spec v2.pdf', size: 3, created: '2026-10-01T10:00:00.000+0000', content: SITE + '/secure/attachment/51/spec v2.pdf' };
+  const OLD_SHOT = { id: '49', filename: 'shot.png', size: 9, created: '2026-09-01T10:00:00.000+0000', content: SITE + '/secure/attachment/49/shot.png' };
+  const DRAWN = { id: '52', filename: DRAWN_NAME, size: 5, content: SITE + '/secure/attachment/52/' + DRAWN_NAME };
+  const COMMENTS = [
+    { id: 101, author: { displayName: 'Anna Nowak' }, created: '2026-10-02T09:15:00.000+0000', body: 'h2. Review\nLooks *good*, see !shot.png!' },
+    { id: 102, author: { displayName: 'Jan Kowalski' }, created: '2026-10-03T11:00:00.000+0000', body: 'Done.' }
+  ];
+  routes = [
+    { match: '/rest/api/2/issue/PROJ-2/comment?', body: { comments: COMMENTS, total: 2 } },
+    { match: '/secure/attachment/50/shot.png', body: 'PNG1' },
+    { match: '/secure/attachment/51/spec v2.pdf', body: 'PDF' },
+    { match: '/rest/api/2/issue/PROJ-2?', body: issue('PROJ-2', Object.assign({}, STORY.fields, {
+      updated: '2026-10-03T11:00:00.000+0000', description: 'Before: !shot.png!', attachment: [OLD_SHOT, SHOT, SPEC, DRAWN] })) }
+  ];
+  answers.warning = 'Pull';
+  await pullIssueCommand(uri(SYNCED));
+  const synced = disk.get(SYNCED);
+  assert(!errors.length, 'pulling comments and files works, got: ' + errors.join(' | '));
+  assert(synced.includes('# Add two-factor login\n\nBefore: ![shot.png](./attachments/PROJ-2/shot.png)\n'),
+    'an attachment shown in the description is downloaded and shown from disk, got:\n' + synced);
+  assert(disk.get('/w/jira/attachments/PROJ-2/shot.png') === 'PNG1' && disk.get('/w/jira/attachments/PROJ-2/spec v2.pdf') === 'PDF' &&
+    !disk.has('/w/jira/attachments/PROJ-2/' + DRAWN_NAME), 'the newest file of each name is downloaded, drawn diagrams are not');
+  assert(synced.includes('## Comments <!-- jira-comments -->\n\n' +
+    '### Anna Nowak, 2026-10-02 09:15 <!-- jira-comment 101 -->\n\n##### Review\n\nLooks **good**, see ![shot.png](./attachments/PROJ-2/shot.png)\n\n' +
+    '### Jan Kowalski, 2026-10-03 11:00 <!-- jira-comment 102 -->\n\nDone.\n\n' +
+    '### Mine, not sent\n\nPlease check *this*.\n\n'),
+  'comments come with authors and ids, headings below the comment\'s, and an unsent one is kept, got:\n' + synced);
+  assert(synced.endsWith('## Attachments <!-- jira-attachments -->\n\n- [shot.png](./attachments/PROJ-2/shot.png)\n' +
+    '- [spec v2.pdf](./attachments/PROJ-2/spec%20v2.pdf)\n'), 'every file is listed at the end, got:\n' + synced);
+
+  reset();
+  disk.set(SYNCED, synced.replace('Done.', 'Done, edited.'));
+  disk.set('/w/jira/attachments/PROJ-2/shot.png', 'PNG1');
+  disk.set('/w/jira/attachments/PROJ-2/spec v2.pdf', 'PDF');
+  disk.set('/w/jira/notes.txt', 'new file');
+  disk.set(SYNCED, disk.get(SYNCED).replace('- [shot.png]', '- [notes.txt](./notes.txt)\n- [shot.png]'));
+  routes = [
+    { match: '/rest/api/2/issue/PROJ-2/comment?', body: { comments: COMMENTS, total: 2 } },
+    { method: 'POST', match: '/rest/api/2/issue/PROJ-2/comment', body: { id: 900, author: { displayName: 'Beata' }, created: '2026-11-03T12:00:00.000+0000' } },
+    { method: 'PUT', match: '/rest/api/2/issue/PROJ-2/comment/102', status: 403 },
+    { match: '/rest/api/2/issue/PROJ-2?fields=updated', body: { fields: { updated: '2026-11-03T12:01:00.000+0000' } } },
+    { match: '/rest/api/2/issue/PROJ-2?fields=attachment', body: { fields: { attachment: [SHOT, SPEC] } } },
+    { match: '/secure/attachment/50/shot.png', body: 'PNG1' },
+    { match: '/secure/attachment/51/spec v2.pdf', body: 'PDF' },
+    { method: 'POST', match: '/rest/api/2/issue/PROJ-2/attachments', body: (files) => files.map((f) => ({
+      id: '60', filename: f.name, size: f.text.length, content: SITE + '/secure/attachment/60/' + f.name })) },
+    { match: '/rest/api/2/issue/PROJ-2?', body: issue('PROJ-2', Object.assign({}, STORY.fields, {
+      updated: '2026-10-03T11:00:00.000+0000', attachment: [SHOT, SPEC] })) },
+    { method: 'PUT', match: '/rest/api/2/issue/PROJ-2', status: 204 }
+  ];
+  await publishIssueCommand(uri(SYNCED));
+  const issuePut = sent.find((r) => r.method === 'PUT' && r.url.endsWith('/issue/PROJ-2'));
+  const commentPost = sent.find((r) => r.method === 'POST' && r.url.endsWith('/comment'));
+  const fileUploads = sent.filter((r) => r.method === 'POST' && r.url.endsWith('/attachments'));
+  assert(!errors.length && issuePut && issuePut.body.fields.description === 'Before: !shot.png!' && !issuePut.body.fields.description.includes('Comments'),
+    'the description goes without the sections, with the attachment shown again, got: ' + errors.join(' | ') + JSON.stringify(issuePut && issuePut.body));
+  assert(commentPost && commentPost.body.body === 'Please check _this_.', 'the new comment is added, got: ' + JSON.stringify(commentPost && commentPost.body));
+  assert(sent.some((r) => r.method === 'PUT' && r.url.endsWith('/comment/102')) && !sent.some((r) => r.url.endsWith('/comment/101')),
+    'only the changed comment is updated');
+  assert(fileUploads.length === 1 && fileUploads[0].body[0].name === 'notes.txt', 'only the new listed file is uploaded, got: ' + JSON.stringify(fileUploads.map((u) => u.body)));
+  assert(info.some((m) => m.includes('Added 1 comment.') && m.includes('Jira refused to change 1 comment (only their authors can): Jan Kowalski, 2026-10-03 11:00.')),
+    'the comments are reported, got: ' + info.join(' | '));
+  assert(disk.get(SYNCED).includes('### Beata, 2026-11-03 12:00 <!-- jira-comment 900 -->\n\nPlease check *this*.') &&
+    !disk.get(SYNCED).includes('Mine, not sent') && disk.get(SYNCED).includes('updated: 2026-11-03T12:01:00.000+0000'),
+  'the new comment gets its id in the file, got:\n' + disk.get(SYNCED));
+
+  reset();
+  settings = { downloadFolder: 'jira', descriptionFormat: 'wiki', sync: { comments: false, attachments: false } };
+  routes = [{ match: '/rest/api/2/issue/PROJ-2?', body: issue('PROJ-2', Object.assign({}, STORY.fields, { attachment: [SHOT] })) }];
+  answers.input = SITE + '/browse/PROJ-2';
+  await fetchIssueCommand();
+  assert(!errors.length && !sent.some((r) => /comment|attachment\//.test(r.url)) &&
+    !disk.get(STORY_PKG_FILE).includes('jira-comments') && !disk.get(STORY_PKG_FILE).includes('jira-attachments'),
+  'with comments and files unchecked a download fetches neither, got: ' + sent.map((r) => r.url).join(', '));
+
+  reset();
+  settings = { sync: { summary: false, description: false, comments: false, attachments: false } };
+  disk.set(FILE, LOCAL);
+  await publishIssueCommand(uri(FILE));
+  assert(!sent.length && warnings.some((m) => m.includes('Nothing to publish')), 'with every part unchecked nothing is sent');
 
   const { rebaseLinks } = require('../src/attachments');
   assert(rebaseLinks('[a](./x/a.ts#L1) ![i](img.png "t") [w](https://x.y/a) [h](#top)', '/w/docs', '/w/jira/P') ===

@@ -5,7 +5,9 @@ const { contextAndIssue, loadEpicChildren } = require('./issues');
 const { issueFileName, subfolderSegments } = require('./fileNames');
 const { issueDocument } = require('./issueDocument');
 const { readSavedIssues, confirmOverwrite } = require('./savedIssues');
-const { downloadFolderUri, askSubfolder } = require('./config');
+const { downloadFolderUri, askSubfolder, syncParts } = require('./config');
+const { issueExtras } = require('./localAttachments');
+const { parseFrontMatter } = require('./frontMatter');
 const { credentialsFor } = require('./credentials');
 const { errorMessage } = require('./messages');
 
@@ -68,7 +70,8 @@ function filesFor(folder, top, selected, saved) {
       uri: vscode.Uri.joinPath(folder, ...segments),
       dirUri: vscode.Uri.joinPath(folder, ...segments.slice(0, -1)),
       sameIssue: owners.get(relPath) === issue.key,
-      content: issueDocument(issue, owners.get(relPath) === issue.key ? texts.get(relPath) : '')
+      issue,
+      previousText: owners.get(relPath) === issue.key ? texts.get(relPath) : ''
     };
   });
 }
@@ -112,9 +115,19 @@ async function fetchIssueCommand() {
 
   const files = filesFor(folder, issue, selected, await readSavedIssues(folder));
   if (!await confirmOverwrite(files)) return;
-  for (const file of files) {
-    await vscode.workspace.fs.createDirectory(file.dirUri);
-    await vscode.workspace.fs.writeFile(file.uri, Buffer.from(file.content, 'utf8'));
+  const parts = syncParts(folder);
+  try {
+    await withNotification('Saving ' + files.length + ' ' + issuesWord(files.length) + '…', async () => {
+      for (const file of files) {
+        await vscode.workspace.fs.createDirectory(file.dirUri);
+        const extras = await issueExtras(creds, file.issue, file.uri, parseFrontMatter(file.previousText).body, parts);
+        const content = issueDocument(file.issue, file.previousText, extras);
+        await vscode.workspace.fs.writeFile(file.uri, Buffer.from(content, 'utf8'));
+      }
+    });
+  } catch (e) {
+    vscode.window.showErrorMessage(errorMessage(e));
+    return;
   }
 
   await vscode.window.showTextDocument(
