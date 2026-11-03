@@ -3,6 +3,16 @@
 This file lists user-visible changes to Jira to Markdown. The project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.6.0] - 2026-11-03
+
+### Added
+
+- ` ```mermaid ` diagrams are shown in Jira: Publish draws each one as a PNG
+  image inside VS Code, attaches it to the issue and shows it where the block
+  was. An unchanged diagram is not drawn or uploaded again. A diagram Mermaid
+  cannot draw goes as code, and the message says why. Pull turns the images
+  back into the ` ```mermaid ` blocks.
+
 ## [1.5.0] - 2026-10-30
 
 ### Added

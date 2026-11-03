@@ -95,3 +95,21 @@ out unchanged.
 Pull, and downloading an issue again into the same file, turn links to those
 attachments back into the local links. A first download keeps the links to the
 attachments in Jira.
+
+## Mermaid diagrams
+
+Jira has no Mermaid support, so Publish draws each ` ```mermaid ` block as a
+PNG image and attaches it to the issue as `mermaid-<hash>.png`; the description
+shows the image where the block was (`!mermaid-<hash>.png!` in wiki markup).
+The name follows the diagram's code, so an unchanged diagram keeps its
+attachment and is not drawn again, while a changed one gets a new attachment.
+
+The diagrams are drawn in a VS Code window that opens beside the editor for a
+moment, with the Mermaid library that ships with the extension; no diagram
+leaves your computer except as the attachment. A block that Mermaid cannot draw,
+e.g. with a syntax error, goes to Jira as a code block, and the message after
+publishing says why.
+
+Pull, and downloading the issue again into the same file, put the
+` ```mermaid ` blocks back in place of their images. A first download, with no
+file holding the code yet, keeps the images.

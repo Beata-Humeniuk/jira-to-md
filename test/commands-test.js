@@ -5,6 +5,8 @@ const info = [];
 const errors = [];
 const warnings = [];
 const answers = {};
+const drawnSources = [];
+const panels = { opened: 0, disposed: 0 };
 let settings = {};
 let folderSettings = {};
 let routes = [];
@@ -50,7 +52,30 @@ const vscodeStub = {
   WorkspaceEdit,
   ProgressLocation: { Notification: 15 },
   FileType: { File: 1, Directory: 2 },
+  ViewColumn: { Beside: -2 },
   window: {
+    // Draws a diagram as the bytes "PNG:<source>"; a source containing "broken" fails like a Mermaid syntax error.
+    createWebviewPanel: () => {
+      let listener = null;
+      let disposed = null;
+      const panel = {
+        webview: {
+          cspSource: 'vscode-resource:',
+          asWebviewUri: (u) => u.path,
+          onDidReceiveMessage: (cb) => { listener = cb; },
+          postMessage: async ({ id, source }) => {
+            drawnSources.push(source);
+            setTimeout(() => listener(source.includes('broken') ? { id, error: 'Parse error on line 2:' }
+              : { id, png: Buffer.from('PNG:' + source).toString('base64') }));
+          },
+          set html(value) { panel.html = value; setTimeout(() => listener({ ready: true })); }
+        },
+        onDidDispose: (cb) => { disposed = cb; },
+        dispose: () => { panels.disposed++; if (disposed) disposed(); }
+      };
+      panels.opened++;
+      return panel;
+    },
     activeTextEditor: null,
     showInformationMessage: (message) => { info.push(message); },
     showErrorMessage: (message) => { errors.push(message); },
@@ -585,6 +610,81 @@ async function main() {
   const { rebaseLinks } = require('../src/attachments');
   assert(rebaseLinks('[a](./x/a.ts#L1) ![i](img.png "t") [w](https://x.y/a) [h](#top)', '/w/docs', '/w/jira/P') ===
     '[a](../../docs/x/a.ts#L1) ![i](../../docs/img.png "t") [w](https://x.y/a) [h](#top)', 'relative links follow a copied file');
+
+  require('../src/mermaidRenderer').initMermaidRenderer({ extensionUri: uri('/ext') });
+  const { diagramName, diagramsIn, withDiagramImages, restoreDiagrams } = require('../src/mermaidImages');
+  const FLOW = 'graph TD\n  A --> B';
+  const SEQ = 'sequenceDiagram\n  A->>B: hi';
+  const FLOW_NAME = diagramName(FLOW);
+  assert(/^mermaid-[0-9a-f]{12}\.png$/.test(FLOW_NAME) && diagramName(FLOW + '\r\n\n') === FLOW_NAME && diagramName(SEQ) !== FLOW_NAME,
+    'a diagram is named after its source, got: ' + FLOW_NAME);
+  const twice = '```mermaid\n' + FLOW + '\n```\n\n> ```mermaid\n> ' + FLOW.replace('\n', '\n> ') + '\n> ```\n\n```js\nx\n```\n';
+  assert(diagramsIn(twice).length === 1, 'a diagram used twice is drawn once');
+  assert(withDiagramImages(twice, new Set([FLOW_NAME])) === '![Mermaid diagram](' + FLOW_NAME + ')\n\n> ![Mermaid diagram](' + FLOW_NAME + ')\n\n```js\nx\n```\n',
+    'mermaid blocks become images, also in a quote, got:\n' + withDiagramImages(twice, new Set([FLOW_NAME])));
+  const ATT = { filename: FLOW_NAME, content: SITE + '/secure/attachment/30/' + FLOW_NAME };
+  const previous = 'Intro\n\n```mermaid\n' + FLOW + '\n```\n';
+  assert(restoreDiagrams('Intro\n\n![Mermaid diagram](' + ATT.content + ')\n', [ATT], previous) === 'Intro\n\n```mermaid\n' + FLOW + '\n```\n' &&
+    restoreDiagrams('!' + FLOW_NAME + '|thumbnail!', [ATT], previous) === '```mermaid\n' + FLOW + '\n```',
+  'downloaded diagram images become the blocks of the previous file again');
+  assert(restoreDiagrams('![Mermaid diagram](' + ATT.content + ')', [ATT], 'no diagrams') === '![Mermaid diagram](' + ATT.content + ')',
+    'without the source the image stays');
+
+  reset();
+  settings = {};
+  const DIAGRAM_FILE = '/w/jira/PROJ-8_Package_change/PROJ-8_Package_change.md';
+  const DIAGRAMS = '---\njira:\n  url: ' + SITE + '/browse/PROJ-8\n  updated: 2026-09-01T10:00:00.000+0000\n---\n\n' +
+    '# Package change\n\nFlow:\n\n```mermaid\n' + FLOW + '\n```\n\n```mermaid\n' + SEQ + '\n```\n\n```mermaid\ngraph TD\n  A -- broken\n```\n';
+  disk.set(DIAGRAM_FILE, DIAGRAMS);
+  let attachmentId = 40;
+  routes = [
+    { match: '/rest/api/2/issue/PROJ-8?fields=updated', body: { fields: { updated: '2026-11-03T09:00:00.000+0000' } } },
+    { match: '/rest/api/2/issue/PROJ-8?fields=attachment', body: { fields: { attachment: [ATT] } } },
+    { match: '/rest/api/2/issue/PROJ-8?', body: RICH },
+    { method: 'POST', match: '/rest/api/2/issue/PROJ-8/attachments', body: (files) => files.map((f) => ({
+      id: String(attachmentId), filename: f.name, size: f.text.length, content: SITE + '/secure/attachment/' + (attachmentId++) + '/' + f.name })) },
+    { method: 'PUT', match: '/rest/api/2/issue/PROJ-8', status: 204 }
+  ];
+  drawnSources.length = 0;
+  await publishIssueCommand(uri(DIAGRAM_FILE));
+  const diagramUploads = sent.filter((r) => r.method === 'POST');
+  const diagramHtml = (sent.find((r) => r.method === 'PUT') || { body: { fields: {} } }).body.fields.description || '';
+  assert(!errors.length && drawnSources.length === 2 && drawnSources[0] === SEQ && drawnSources[1].includes('broken'),
+    'only diagrams without an attachment are drawn, got: ' + errors.join(' | ') + JSON.stringify(drawnSources));
+  assert(panels.opened === 1 && panels.disposed === 1, 'one drawing window is opened and closed');
+  assert(diagramUploads.length === 1 && diagramUploads[0].body[0].name === diagramName(SEQ) && diagramUploads[0].body[0].text === 'PNG:' + SEQ,
+    'the new diagram is attached as PNG, got: ' + JSON.stringify(diagramUploads.map((u) => u.body)));
+  assert(diagramHtml.includes('<img src="' + ATT.content + '" alt="Mermaid diagram">') &&
+    diagramHtml.includes('<img src="' + SITE + '/secure/attachment/40/' + diagramName(SEQ) + '" alt="Mermaid diagram">') &&
+    diagramHtml.includes('<code class="language-mermaid">graph TD\n  A -- broken'),
+  'drawn diagrams are images in the description, the broken one stays code, got: ' + diagramHtml);
+  assert(info.some((m) => m.includes('Drew 1 diagram.') && m.includes('A diagram could not be drawn and went as code: Parse error on line 2:')),
+    'drawing is reported, got: ' + info.join(' | '));
+  assert(disk.get(DIAGRAM_FILE).includes('```mermaid\n' + SEQ), 'the file keeps its mermaid blocks');
+
+  reset();
+  settings = { descriptionFormat: 'wiki' };
+  disk.set(DIAGRAM_FILE, DIAGRAMS.replace(/\n\n```mermaid\n(sequenceDiagram|graph TD\n  A -- broken)[\s\S]*?```/g, ''));
+  routes = [
+    { match: '/rest/api/2/issue/PROJ-8?fields=updated', body: { fields: { updated: '2026-11-03T09:00:00.000+0000' } } },
+    { match: '/rest/api/2/issue/PROJ-8?fields=attachment', body: { fields: { attachment: [ATT] } } },
+    { match: '/rest/api/2/issue/PROJ-8?', body: RICH },
+    { method: 'PUT', match: '/rest/api/2/issue/PROJ-8', status: 204 }
+  ];
+  panels.opened = 0;
+  await publishIssueCommand(uri(DIAGRAM_FILE));
+  const wikiPut = sent.find((r) => r.method === 'PUT');
+  assert(!errors.length && panels.opened === 0 && wikiPut.body.fields.description === 'Flow:\n\n!' + FLOW_NAME + '!',
+    'an unchanged diagram reuses its attachment without drawing, in wiki markup too, got: ' + errors.join(' | ') + JSON.stringify(wikiPut && wikiPut.body));
+
+  reset();
+  disk.set(DIAGRAM_FILE, DIAGRAMS);
+  routes = [{ match: '/rest/api/2/issue/PROJ-8?', body: issue('PROJ-8', { summary: 'Package change', attachment: [ATT],
+    description: '<p>Flow, edited:</p>\n<p><img src="' + ATT.content + '" alt="Mermaid diagram"></p>', updated: '2026-11-03T10:00:00.000+0000' }) }];
+  answers.warning = 'Pull';
+  await pullIssueCommand(uri(DIAGRAM_FILE));
+  assert(!errors.length && disk.get(DIAGRAM_FILE).includes('Flow, edited:\n\n```mermaid\n' + FLOW + '\n```'),
+    'a pull brings the mermaid block back in place of its image, got:\n' + disk.get(DIAGRAM_FILE));
 
   const { relinkLocalFiles } = require('../src/attachments');
   assert(relinkLocalFiles('[cfg|^config.ts] and [^old.ts] and [x|^other.ts]', [], '[a](./conf/config.ts) [b](./conf/old.ts)') ===

@@ -2,7 +2,7 @@
   "name": "jira-to-md",
   "displayName": "Jira to Markdown",
   "description": "Download Jira issues and whole epics as Markdown files, edit them in VS Code, and publish them back to Jira.",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "publisher": "beatahumeniuk",
   "license": "MIT",
   "author": {
@@ -105,14 +105,15 @@
     }
   },
   "scripts": {
-    "build": "esbuild src/extension.js --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node --minify",
+    "build": "esbuild src/extension.js --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node --minify && node scripts/copy-mermaid.js",
     "vscode:prepublish": "npm run build",
     "test": "node test/client-test.js && node test/wiki-test.js && node test/html-test.js && node test/file-names-test.js && node test/preview-button-test.js && node test/commands-test.js",
     "package": "npm run build && vsce package --no-dependencies"
   },
   "devDependencies": {
     "@vscode/vsce": "3.9.2",
-    "esbuild": "^0.21.5"
+    "esbuild": "^0.21.5",
+    "mermaid": "12.2.0"
   },
   "dependencies": {
     "markdown-it": "^15.0.0"

@@ -3,6 +3,7 @@ const { issueWebUrl } = require('./jiraClient');
 const { wikiToMd } = require('./wikiToMd');
 const { htmlToMd, looksLikeHtml } = require('./htmlToMd');
 const { relinkLocalFiles } = require('./attachments');
+const { restoreDiagrams } = require('./mermaidImages');
 
 const EXTENSION_VERSION = require('../package.json').version;
 
@@ -28,7 +29,10 @@ function withTitle(title, body) {
 
 function content(issue, previousText, title) {
   const md = looksLikeHtml(issue.description) ? htmlToMd(issue.description) : wikiToMd(issue.description);
-  const body = previousText ? relinkLocalFiles(md, issue.attachments, parseFrontMatter(previousText).body) : md;
+  const previousBody = previousText ? parseFrontMatter(previousText).body : '';
+  const body = previousText
+    ? relinkLocalFiles(restoreDiagrams(md, issue.attachments, previousBody), issue.attachments, previousBody)
+    : md;
   return withTitle(title || issue.summary, body);
 }
 

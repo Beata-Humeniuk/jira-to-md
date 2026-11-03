@@ -96,6 +96,11 @@ you published stays where it is.
 A file can be bound to a Jira issue and a Confluence page at once, so one file
 can be published to both.
 
+Jira does not draw Mermaid, so each ` ```mermaid ` block is drawn as a PNG
+image, attached to the issue and shown in its place. Diagrams are drawn inside
+VS Code; nothing is sent anywhere but your Jira. The file keeps the Mermaid
+code, and Pull turns the images back into the blocks.
+
 The description is sent as HTML by default, which suits description fields
 edited in a rich-text editor. Set `jiraToMd.descriptionFormat` to `wiki` for
 the standard Jira wiki editor.

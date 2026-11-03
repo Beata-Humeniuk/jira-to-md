@@ -8,6 +8,8 @@ const {
   parseJiraUrl, isCloud, issueWebUrl, fetchIssue, createIssue, updateIssue, uploadAttachment, downloadAttachment
 } = require('./jiraClient');
 const { localTargets, rebaseLinks } = require('./attachments');
+const { diagramsIn, withDiagramImages } = require('./mermaidImages');
+const { renderDiagrams } = require('./mermaidRenderer');
 const { contextAndIssue } = require('./issues');
 const { issueFileName } = require('./fileNames');
 const { publishedDocument } = require('./issueDocument');
@@ -60,8 +62,33 @@ function attachableUri(source, path) {
   return uri.path.startsWith(root) ? uri : null;
 }
 
+// ```mermaid blocks become PNG attachments shown in their place, as Jira draws no Mermaid. A diagram
+// is named after its source, so an unchanged one keeps its attachment and is not drawn again.
+async function attachDiagrams(creds, site, key, diagrams, attachments, links) {
+  const missing = diagrams.filter((d) => !attachments.some((a) => a.filename === d.name));
+  const drawn = missing.length ? await renderDiagrams(missing.map((d) => d.source)) : [];
+  const failed = [];
+  let uploaded = 0;
+  for (const diagram of diagrams) {
+    let attachment = attachments.find((a) => a.filename === diagram.name);
+    if (!attachment) {
+      const result = drawn[missing.indexOf(diagram)];
+      if (result.error) {
+        failed.push(result.error);
+        continue;
+      }
+      attachment = await uploadAttachment(creds, site, key, diagram.name, result.png);
+      attachments.unshift(attachment);
+      uploaded++;
+    }
+    links[diagram.name] = { url: attachment.content, filename: attachment.filename };
+  }
+  return { drawn: uploaded, failed };
+}
+
 // Files the description links to (./config.ts) go to Jira as attachments of the issue, so the
 // links still lead somewhere there. An attachment with the same name and content is reused.
+// content comes back with the drawn diagrams as images.
 async function attachLinkedFiles(creds, site, key, source, content) {
   const files = [];
   for (const target of localTargets(content)) {
@@ -69,7 +96,8 @@ async function attachLinkedFiles(creds, site, key, source, content) {
     const bytes = uri && await readLocalFile(uri);
     if (bytes) files.push({ ...target, bytes });
   }
-  if (!files.length) return { links: undefined, uploaded: [] };
+  const diagrams = diagramsIn(content);
+  if (!files.length && !diagrams.length) return { content, links: undefined, uploaded: [], drawn: 0, failed: [] };
 
   const attachments = (await fetchIssue(creds, site, key, ['attachment'])).fields.attachment || [];
   const links = {};
@@ -90,11 +118,16 @@ async function attachLinkedFiles(creds, site, key, source, content) {
     }
     links[file.href] = { url: attachment.content, filename: attachment.filename };
   }
-  return { links, uploaded };
+  const { drawn, failed } = await attachDiagrams(creds, site, key, diagrams, attachments, links);
+  const named = new Set(diagrams.map((d) => d.name).filter((name) => links[name]));
+  return { content: withDiagramImages(content, named), links, uploaded, drawn, failed };
 }
 
-function attachedNote(uploaded) {
-  return uploaded.length ? ' Attached ' + uploaded.join(', ') + '.' : '';
+function attachedNote({ uploaded, drawn, failed }) {
+  return (uploaded.length ? ' Attached ' + uploaded.join(', ') + '.' : '') +
+    (drawn ? ' Drew ' + drawn + (drawn === 1 ? ' diagram.' : ' diagrams.') : '') +
+    (failed.length ? ' ' + (failed.length === 1 ? 'A diagram' : failed.length + ' diagrams') +
+      ' could not be drawn and went as code: ' + failed.join('; ') + '.' : '');
 }
 
 function editorSource(editor) {
@@ -188,19 +221,19 @@ async function publishUpdate(source, meta, title, content) {
   }
 
   const summary = meta.keepSummary ? current.summary : title;
-  const { updated, uploaded } = await withNotification('Publishing ' + current.key + ' to Jira…', async () => {
-    const { links, uploaded: names } = await attachLinkedFiles(creds, parsed.site, current.key, source, content);
-    const description = descriptionFor(content, current.fields.description, links);
+  const { updated, attached } = await withNotification('Publishing ' + current.key + ' to Jira…', async () => {
+    const files = await attachLinkedFiles(creds, parsed.site, current.key, source, content);
+    const description = descriptionFor(files.content, current.fields.description, files.links);
     const fields = meta.keepSummary ? { description } : { summary, description };
     await updateIssue(creds, parsed.site, current.key, { fields });
-    return { updated: await fetchIssue(creds, parsed.site, current.key, ['updated']), uploaded: names };
+    return { updated: await fetchIssue(creds, parsed.site, current.key, ['updated']), attached: files };
   });
 
   await writeBinding(source, Object.assign({}, meta, { updated: updated.fields.updated }));
   const copy = await saveToPackage(source,
     Object.assign({}, current, { summary, updated: updated.fields.updated }), null, content);
   vscode.window.showInformationMessage('Published ' + current.key + ' "' + summary + '".' +
-    attachedNote(uploaded) + savedNote(copy));
+    attachedNote(attached) + savedNote(copy));
   return { url: meta.url, key: current.key, action: 'updated' };
 }
 
@@ -274,13 +307,13 @@ async function publishNew(source, title, content) {
   const created = await withNotification('Creating the issue in Jira…', async () => {
     const made = await createIssue(creds, parsed.site, fields);
     // Attachments need the issue, so links to local files are fixed once it exists.
-    const { links, uploaded } = await attachLinkedFiles(creds, parsed.site, made.key, source, content);
-    if (links) {
-      const linked = descriptionFor(content, epic && epic.fields.description, links);
+    const files = await attachLinkedFiles(creds, parsed.site, made.key, source, content);
+    if (files.links) {
+      const linked = descriptionFor(files.content, epic && epic.fields.description, files.links);
       await updateIssue(creds, parsed.site, made.key, { fields: { description: linked } });
     }
     const fresh = await fetchIssue(creds, parsed.site, made.key, ['updated']);
-    return { key: made.key, updated: fresh.fields.updated, uploaded };
+    return { key: made.key, updated: fresh.fields.updated, attached: files };
   });
 
   const url = issueWebUrl(parsed.site, created.key);
@@ -289,7 +322,7 @@ async function publishNew(source, title, content) {
     key: created.key, summary: title, type, updated: created.updated, epic: epic ? epic.key : '', site: parsed.site
   }, epic, content);
   vscode.window.showInformationMessage('Created ' + created.key + ' "' + title + '"' +
-    (epic ? ' in epic ' + epic.key : '') + '.' + attachedNote(created.uploaded) + savedNote(copy));
+    (epic ? ' in epic ' + epic.key : '') + '.' + attachedNote(created.attached) + savedNote(copy));
   return { url, key: created.key, action: 'created' };
 }
 
