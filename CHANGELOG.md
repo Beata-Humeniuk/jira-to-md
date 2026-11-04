@@ -3,6 +3,14 @@
 This file lists user-visible changes to Jira to Markdown. The project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.6.1] - 2026-11-04
+
+### Fixed
+
+- A status, issue type or epic containing a colon (for example
+  `Implementacja: Poprawa błędu`) is written in quotes, so the Markdown preview
+  no longer shows "Failed to parse frontmatter". Pull fixes files saved before.
+
 ## [1.6.0] - 2026-11-03
 
 ### Added

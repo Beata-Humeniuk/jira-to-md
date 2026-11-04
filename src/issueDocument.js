@@ -1,4 +1,4 @@
-const { serializeFrontMatter, parseFrontMatter } = require('./frontMatter');
+const { serializeFrontMatter, parseFrontMatter, yamlScalar } = require('./frontMatter');
 const { issueWebUrl } = require('./jiraClient');
 const { wikiToMd } = require('./wikiToMd');
 const { htmlToMd, looksLikeHtml } = require('./htmlToMd');
@@ -16,9 +16,9 @@ function isoToday() {
 
 function describeLines(issue) {
   const lines = ['key: ' + issue.key];
-  if (issue.type) lines.push('issueType: ' + issue.type);
-  if (issue.status) lines.push('status: ' + issue.status);
-  if (issue.epic) lines.push('epic: ' + issue.epic);
+  if (issue.type) lines.push('issueType: ' + yamlScalar(issue.type));
+  if (issue.status) lines.push('status: ' + yamlScalar(issue.status));
+  if (issue.epic) lines.push('epic: ' + yamlScalar(issue.epic));
   lines.push('generator: jira-to-md@' + EXTENSION_VERSION, 'generated: ' + isoToday(), 'managed: true');
   return lines;
 }

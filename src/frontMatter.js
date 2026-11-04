@@ -56,4 +56,16 @@ function withFrontMatterValue(extraLines, key, value) {
   return lines;
 }
 
-module.exports = { parseFrontMatter, serializeFrontMatter, frontMatterValue, withFrontMatterValue };
+// A value as a YAML scalar: plain when YAML reads it back as the same string, otherwise double-quoted,
+// so a Jira status like "Implementacja: Poprawa błędu" does not break the front matter.
+function yamlScalar(value) {
+  const s = String(value);
+  const plain = s !== '' && s === s.trim() && !/[\u0000-\u001f\\"]/.test(s) &&
+    !/^[-?:,[\]{}#&*!|>'%@`]/.test(s) && !/:(\s|$)|\s#/.test(s) &&
+    !/^(true|false|yes|no|on|off|null|~|[-+]?(\d[\d_.]*|\.\d+)([eE][-+]?\d+)?|\.inf|\.nan)$/i.test(s);
+  if (plain) return s;
+  return '"' + s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/[\u0000-\u001f]/g,
+    (c) => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0')) + '"';
+}
+
+module.exports = { parseFrontMatter, serializeFrontMatter, frontMatterValue, withFrontMatterValue, yamlScalar };
