@@ -824,6 +824,17 @@ async function main() {
   assert(relinkLocalFiles('[cfg|^config.ts] and [^old.ts] and [x|^other.ts]', [], '[a](./conf/config.ts) [b](./conf/old.ts)') ===
     '[cfg](./conf/config.ts) and [old.ts](./conf/old.ts) and [x|^other.ts]', 'wiki attachment links go back to local files');
 
+  reset();
+  routes = [{ match: '/rest/api/2/issue/PROJ-9?', body: issue('PROJ-9', { status: { name: 'Implementacja: Poprawa błędu' } }) }];
+  answers.input = SITE + '/browse/PROJ-9';
+  await fetchIssueCommand();
+  const colonFile = Array.from(disk.values()).find((t) => t.includes('key: PROJ-9'));
+  assert(colonFile && colonFile.includes('\nstatus: "Implementacja: Poprawa błędu"\n') && colonFile.includes('\nissueType: Story\n'),
+  'a status with a colon is quoted so the front matter stays valid YAML, got:\n' + colonFile);
+  const { yamlScalar } = require('../src/frontMatter');
+  assert(yamlScalar('To Do') === 'To Do' && yamlScalar('Błąd z testów') === 'Błąd z testów' && yamlScalar('true') === '"true"' &&
+    yamlScalar('a "b" #c') === '"a \\"b\\" #c"' && yamlScalar('[UFE] x') === '"[UFE] x"', 'values are quoted only when YAML needs it');
+
   console.log('PASS: download, pull and push commands ok');
 }
 
