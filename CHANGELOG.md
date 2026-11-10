@@ -3,6 +3,15 @@
 This file lists user-visible changes to Jira to Markdown. The project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.6.2] - 2026-11-10
+
+### Fixed
+
+- A dash between words in the issue summary no longer shows up in the file
+  name as `_-_`: `PBAN-1110 Konfiguracja promocji - aktualizacja` is saved as
+  `PBAN-1110_Konfiguracja_promocji_aktualizacja.md`. Files already downloaded
+  keep their names; Pull still finds them by issue key.
+
 ## [1.6.1] - 2026-11-04
 
 ### Fixed

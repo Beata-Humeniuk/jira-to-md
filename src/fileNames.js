@@ -1,10 +1,11 @@
 const path = require('path');
 
-// "proj-12" + "Add 2FA: login" -> "PROJ-12_Add_2FA_login.md"; characters no file system accepts are dropped.
+// "proj-12" + "Add 2FA: login" -> "PROJ-12_Add_2FA_login.md"; characters no file system accepts are dropped,
+// and so are dashes standing alone between words ("Promo - update" -> "Promo_update", not "Promo_-_update").
 function issueFileName(key, summary) {
   let name = String(key).toUpperCase();
   const words = String(summary || '').replace(/[<>:"/\\|?*\u0000-\u001f]/g, ' ').split(/\s+/)
-    .map((w) => w.replace(/^[._]+|[._]+$/g, '')).filter(Boolean);
+    .map((w) => w.replace(/^[._\-\u2010-\u2015]+|[._\-\u2010-\u2015]+$/g, '')).filter(Boolean);
   for (const word of words) {
     if ((name + '_' + word).length > 100) break;
     name += '_' + word;

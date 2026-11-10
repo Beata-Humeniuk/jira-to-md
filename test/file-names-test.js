@@ -6,6 +6,9 @@ assert(issueFileName('P1726-07', 'Zmiana pakietu: wywołanie  Read/Current?') ==
   'Polish letters stay, characters a file system rejects are dropped');
 assert(issueFileName('PROJ-1', '') === 'PROJ-1.md', 'an empty summary leaves the key');
 assert(issueFileName('PROJ-1', '... .hidden.') === 'PROJ-1_hidden.md', 'no leading or trailing dots');
+assert(issueFileName('PBAN-1110', '[DEF] Konfiguracja promocji - aktualizacja – opis — nowy') === 'PBAN-1110_[DEF]_Konfiguracja_promocji_aktualizacja_opis_nowy.md',
+  'dashes between words are dropped, got: ' + issueFileName('PBAN-1110', '[DEF] Konfiguracja promocji - aktualizacja – opis — nowy'));
+assert(issueFileName('PROJ-1', '-- draft -x- ') === 'PROJ-1_draft_x.md', 'no leading or trailing dashes');
 const long = issueFileName('PROJ-1', 'word '.repeat(40));
 assert(long.length <= 103 && long.startsWith('PROJ-1_word_'), 'long summaries are cut at a word, got: ' + long);
 
