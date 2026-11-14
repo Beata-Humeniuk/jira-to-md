@@ -84,8 +84,9 @@ default:
 - **Files** — the issue's attachments are downloaded next to the file, into
   `attachments/<KEY>/`, links to them lead there, and the Attachments section
   at the end of the file lists them. Publish uploads files the file links to,
-  including those listed in that section; a file Jira already has is not
-  uploaded again.
+  including those listed in that section and those that linked Markdown files
+  link to (`db.md` → `V02__create.sql`). A file Jira already has is not
+  uploaded again; a changed one replaces its older version in Jira.
 
 A new issue always gets its summary and description.
 

@@ -156,6 +156,10 @@ async function downloadAttachment(cfg, url) {
   return request(cfg, url, { raw: true });
 }
 
+async function deleteAttachment(cfg, site, id) {
+  return apiSend(cfg, site, 'DELETE', '/attachment/' + encodeURIComponent(id));
+}
+
 async function fetchComments(cfg, site, key) {
   const out = [];
   for (;;) {
@@ -176,5 +180,5 @@ async function updateComment(cfg, site, key, id, body) {
 module.exports = {
   parseJiraUrl, hostOf, isCloud, authFor, authHeader, apiRoot, issueWebUrl,
   fetchFields, fetchIssue, searchIssues, createIssue, updateIssue, uploadAttachment, downloadAttachment,
-  fetchComments, addComment, updateComment
+  deleteAttachment, fetchComments, addComment, updateComment
 };
