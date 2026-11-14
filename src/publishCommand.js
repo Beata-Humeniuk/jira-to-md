@@ -6,7 +6,7 @@ const { looksLikeHtml } = require('./htmlToMd');
 const { parseFrontMatter, serializeFrontMatter } = require('./frontMatter');
 const {
   parseJiraUrl, isCloud, issueWebUrl, fetchIssue, createIssue, updateIssue, uploadAttachment, downloadAttachment,
-  fetchComments, addComment, updateComment
+  deleteAttachment, fetchComments, addComment, updateComment
 } = require('./jiraClient');
 const { localTargets, rebaseLinks } = require('./attachments');
 const { diagramsIn, withDiagramImages } = require('./mermaidImages');
@@ -52,14 +52,14 @@ async function readLocalFile(uri) {
 }
 
 // A description can come from Jira, so only files inside the workspace folder are sent, and no
-// hidden ones (.env, .ssh/…).
-function attachableUri(source, path) {
+// hidden ones (.env, .ssh/…). The path is relative to the file `from` (the published one by default).
+function attachableUri(source, path, from) {
   const segments = path.split(/[\\/]/);
   if (segments.some((s) => s[0] === '.' && s !== '.' && s !== '..')) return null;
   const folder = vscode.Uri.joinPath(source.uri, '..');
   const workspace = vscode.workspace.getWorkspaceFolder(source.uri);
   const root = (workspace ? workspace.uri : folder).path.replace(/\/+$/, '') + '/';
-  const uri = vscode.Uri.joinPath(folder, ...segments);
+  const uri = vscode.Uri.joinPath(from ? vscode.Uri.joinPath(from, '..') : folder, ...segments);
   return uri.path.startsWith(root) ? uri : null;
 }
 
@@ -87,24 +87,52 @@ async function attachDiagrams(creds, site, key, diagrams, attachments, links) {
   return { drawn: uploaded, failed };
 }
 
-// Files the description links to (./config.ts) go to Jira as attachments of the issue, so the
-// links still lead somewhere there; so do those in `extra` (the Attachments section, the comments).
-// An attachment with the same name and content is reused. With options.files off nothing is uploaded
-// but the drawn diagrams; content comes back with them as images.
-async function attachLinkedFiles(creds, site, key, source, content, options) {
+const MARKDOWN = /\.(md|markdown)$/i;
+
+// The local files the text links to, and the files those Markdown files link to in turn (db.md →
+// ./V02__create.sql), each read once. Only the first level keeps its href: links in the description
+// point at it, the files further down are just attached.
+async function linkedFiles(source, text) {
   const files = [];
-  const targets = options.files ? localTargets(content + '\n\n' + (options.extra || '')) : [];
-  for (const target of targets) {
-    const uri = attachableUri(source, target.path);
-    const bytes = uri && await readLocalFile(uri);
-    if (bytes) files.push({ ...target, bytes });
+  const seen = new Set([source.uri.path]);
+  const queue = [{ from: source.uri, text, top: true }];
+  while (queue.length) {
+    const { from, text: md, top } = queue.shift();
+    for (const target of localTargets(md)) {
+      const uri = attachableUri(source, target.path, from);
+      if (!uri) continue;
+      const known = files.find((f) => f.uri.path === uri.path);
+      if (known) {
+        if (top && !known.hrefs.includes(target.href)) known.hrefs.push(target.href);
+        continue;
+      }
+      if (seen.has(uri.path)) continue;
+      seen.add(uri.path);
+      const bytes = await readLocalFile(uri);
+      if (!bytes) continue;
+      files.push({ uri, name: target.name, hrefs: top ? [target.href] : [], bytes });
+      if (MARKDOWN.test(target.name)) queue.push({ from: uri, text: bytes.toString('utf8'), top: false });
+    }
   }
+  return files;
+}
+
+// Files the description links to (./config.ts) go to Jira as attachments of the issue, so the
+// links still lead somewhere there; so do those in `extra` (the Attachments section, the comments)
+// and those the linked Markdown files link to. An attachment with the same name and content is
+// reused. A changed file replaces the attachments of its name: the new version is uploaded and the
+// older ones are deleted, so the issue keeps one copy of each file. With options.files off nothing
+// is uploaded but the drawn diagrams; content comes back with them as images.
+async function attachLinkedFiles(creds, site, key, source, content, options) {
+  const files = options.files ? await linkedFiles(source, content + '\n\n' + (options.extra || '')) : [];
   const diagrams = options.diagrams ? diagramsIn(content) : [];
   if (!files.length && !diagrams.length) return { content, links: undefined, uploaded: [], drawn: 0, failed: [] };
 
   const attachments = (await fetchIssue(creds, site, key, ['attachment'])).fields.attachment || [];
   const links = {};
   const uploaded = [];
+  const kept = new Set();
+  const replaced = new Set();
   for (const file of files) {
     let attachment = null;
     for (const a of attachments) {
@@ -119,7 +147,18 @@ async function attachLinkedFiles(creds, site, key, source, content, options) {
       attachments.unshift(attachment);
       uploaded.push(file.name);
     }
-    links[file.href] = { url: attachment.content, filename: attachment.filename };
+    kept.add(String(attachment.id));
+    replaced.add(file.name);
+    for (const href of file.hrefs) links[href] = { url: attachment.content, filename: attachment.filename };
+  }
+  // Older versions go only once every file has its attachment, so two files of one name both stay.
+  for (const a of attachments) {
+    if (!replaced.has(a.filename) || kept.has(String(a.id))) continue;
+    try {
+      await deleteAttachment(creds, site, a.id);
+    } catch (e) {
+      // Jira lets only some users delete attachments; the old version then stays.
+    }
   }
   const { drawn, failed } = await attachDiagrams(creds, site, key, diagrams, attachments, links);
   const named = new Set(diagrams.map((d) => d.name).filter((name) => links[name]));

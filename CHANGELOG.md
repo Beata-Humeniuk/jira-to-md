@@ -3,6 +3,18 @@
 This file lists user-visible changes to Jira to Markdown. The project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.6.3] - 2026-11-14
+
+### Fixed
+
+- Publish no longer piles up copies of a changed file in Jira: the new version
+  is uploaded and the older attachments of the same name are deleted, so the
+  issue keeps one copy of each file. If Jira does not let you delete
+  attachments, the old ones stay.
+- Publish also attaches files that linked Markdown files link to: when the
+  issue file links `db.md` and `db.md` links `V02__create.sql`, both are
+  attached.
+
 ## [1.6.2] - 2026-11-10
 
 ### Fixed

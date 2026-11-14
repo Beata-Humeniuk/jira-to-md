@@ -474,8 +474,10 @@ async function main() {
   const LINKED_FILE = '/w/jira/PROJ-8_Package_change/PROJ-8_Package_change.md';
   const LINKED = '---\njira:\n  url: ' + SITE + '/browse/PROJ-8\n  updated: 2026-09-01T10:00:00.000+0000\n---\n\n' +
     '# Package change\n\nSee [the config](./conf/config.ts), [the old one](./conf/old.ts), [secrets](./.env), ' +
-    '[outside](../../elsewhere.ts) and [missing](./nope.ts).\n';
+    '[outside](../../elsewhere.ts), [missing](./nope.ts) and [the schema](./docs/db.md).\n';
   disk.set(LINKED_FILE, LINKED);
+  disk.set('/w/jira/PROJ-8_Package_change/docs/db.md', '# DB\n\nSee [the migration](../sql/V02__tier.sql), [config](../conf/config.ts) and [back](../PROJ-8_Package_change.md).\n');
+  disk.set('/w/jira/PROJ-8_Package_change/sql/V02__tier.sql', 'create table tier();');
   disk.set('/w/jira/PROJ-8_Package_change/conf/config.ts', 'export const a = 1;');
   disk.set('/w/jira/PROJ-8_Package_change/conf/old.ts', 'old');
   disk.set('/w/jira/PROJ-8_Package_change/.env', 'TOKEN=x');
@@ -489,23 +491,30 @@ async function main() {
     { match: '/rest/api/2/issue/PROJ-8?', body: RICH },
     { match: '/secure/attachment/8/config.ts', body: 'export const a = 2;' },
     { match: '/secure/attachment/9/old.ts', body: 'old' },
-    { method: 'POST', match: '/rest/api/2/issue/PROJ-8/attachments', body: [CONFIG] },
+    { method: 'POST', match: '/rest/api/2/issue/PROJ-8/attachments', body: (files) => files[0].name === 'config.ts' ? [CONFIG]
+      : [{ id: '11', filename: files[0].name, size: files[0].text.length, content: SITE + '/secure/attachment/11/' + files[0].name }] },
+    { method: 'DELETE', match: '/rest/api/2/attachment/', status: 204 },
     { method: 'PUT', match: '/rest/api/2/issue/PROJ-8', status: 204 }
   ];
   await publishIssueCommand(uri(LINKED_FILE));
   const uploads = sent.filter((r) => r.method === 'POST');
   const linkedPut = sent.find((r) => r.method === 'PUT');
-  assert(!errors.length && uploads.length === 1 && uploads[0].body.length === 1 &&
+  assert(!errors.length && uploads.length === 3 && uploads.every((u) => u.body.length === 1) &&
     uploads[0].body[0].name === 'config.ts' && uploads[0].body[0].text === 'export const a = 1;' &&
-    uploads[0].headers['X-Atlassian-Token'] === 'no-check',
-  'a changed linked file is uploaded once; same content is reused, hidden and outside files are not, got: ' +
-    errors.join(' | ') + JSON.stringify(uploads.map((u) => u.body)));
+    uploads[0].headers['X-Atlassian-Token'] === 'no-check' &&
+    uploads[1].body[0].name === 'db.md' && uploads[2].body[0].name === 'V02__tier.sql' &&
+    uploads[2].body[0].text === 'create table tier();',
+  'a changed linked file is uploaded once; same content is reused, hidden and outside files are not; files linked from ' +
+    'a linked Markdown file are attached too, got: ' + errors.join(' | ') + JSON.stringify(uploads.map((u) => u.body)));
+  const deletes = sent.filter((r) => r.method === 'DELETE');
+  assert(deletes.length === 1 && deletes[0].url.endsWith('/rest/api/2/attachment/8'),
+    'the older version of a changed file is deleted, the reused ones stay, got: ' + JSON.stringify(deletes.map((d) => d.url)));
   const linkedHtml = linkedPut.body.fields.description;
   assert(linkedHtml.includes('<a href="' + CONFIG.content + '">the config</a>') &&
     linkedHtml.includes('<a href="' + OLD.content + '">the old one</a>') &&
     linkedHtml.includes('<a href="./.env">') && linkedHtml.includes('<a href="./nope.ts">'),
   'links point at the attachments, got: ' + linkedHtml);
-  assert(info.some((m) => m.includes('Attached config.ts.')), 'the upload is reported, got: ' + info.join(' | '));
+  assert(info.some((m) => m.includes('Attached config.ts, db.md, V02__tier.sql.')), 'the upload is reported, got: ' + info.join(' | '));
 
   reset();
   disk.set(LINKED_FILE, LINKED);
